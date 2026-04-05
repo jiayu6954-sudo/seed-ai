@@ -24,7 +24,7 @@ settings.json
 # ── Runtime data (generated at runtime, not part of source) ──────────────────
 # Seed AI stores all runtime data under ~/.seed/ or $SEED_DATA_DIR by default.
 # If SEED_DATA_DIR is pointed inside the repo, these patterns protect it.
-MEMORY/
+/MEMORY/
 *.seed/
 debug.log
 *.log

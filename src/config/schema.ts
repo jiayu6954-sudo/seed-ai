@@ -150,3 +150,5 @@ export const SettingsSchema = z.object({
 });
 
 export type SeedSettings = z.infer<typeof SettingsSchema>;
+// Alias used by renderer and CLI layer
+export type DevAISettings = SeedSettings;
