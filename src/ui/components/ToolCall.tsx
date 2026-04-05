@@ -42,6 +42,8 @@ function getToolIcon(name: string): string {
 }
 
 // ── Blink hook (CC-style: blink only while running) ────────────────────────
+// Uses 600ms interval aligned to Ink's ~80ms render tick to avoid spurious
+// re-renders that compound the dynamic-zone cursor-tracking drift.
 
 function useBlink(active: boolean): boolean {
   const [visible, setVisible] = useState(true);
@@ -49,18 +51,25 @@ function useBlink(active: boolean): boolean {
 
   useEffect(() => {
     if (!active) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setVisible(true);
-      if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
-    timerRef.current = setInterval(() => setVisible((v) => !v), 600);
+    // Only create a new timer if not already running
+    if (!timerRef.current) {
+      timerRef.current = setInterval(() => setVisible((v) => !v), 600);
+    }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     };
   }, [active]);
 
   return visible;
 }
+
+// Maximum diff lines rendered in dynamic zone; keeps zone height stable.
+// Full diff is always visible in <Static> once the message is complete.
+const MAX_DIFF_LINES = 20;
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -153,7 +162,9 @@ function DiffDisplay({
   result: string;
   palette: ReturnType<typeof useTheme>;
 }): React.ReactElement {
-  const lines = result.split("\n");
+  const allLines = result.split("\n");
+  const truncated = allLines.length > MAX_DIFF_LINES;
+  const lines = truncated ? allLines.slice(0, MAX_DIFF_LINES) : allLines;
   return (
     <Box marginLeft={3} flexDirection="column">
       {lines.map((line, i) => {
@@ -176,6 +187,11 @@ function DiffDisplay({
           </Text>
         );
       })}
+      {truncated && (
+        <Text color={palette.secondary} dimColor>
+          {"  "}…{allLines.length - MAX_DIFF_LINES} more lines
+        </Text>
+      )}
     </Box>
   );
 }
