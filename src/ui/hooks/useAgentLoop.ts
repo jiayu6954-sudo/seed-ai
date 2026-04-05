@@ -436,6 +436,14 @@ export function useAgentLoop({
             };
             newUsage.estimatedCostUsd = calculateCost(settings.model, newUsage);
             totalUsageRef.current = newUsage;
+            // Fix: update context manager's token count so shouldCompact() can trigger.
+            // Without this, lastInputTokens stays 0 and compaction never fires automatically.
+            contextManagerRef.current?.updateTokenCount({
+              input_tokens: newUsage.inputTokens,
+              output_tokens: newUsage.outputTokens,
+              cache_creation_input_tokens: newUsage.cacheWriteTokens,
+              cache_read_input_tokens: newUsage.cacheReadTokens,
+            } as Parameters<ContextManager["updateTokenCount"]>[0]);
             // Innovation 4: keep stats in sync
             statsRef.current.updateUsage({
               inputTokens: event.inputTokens,

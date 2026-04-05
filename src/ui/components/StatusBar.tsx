@@ -55,7 +55,7 @@ export function StatusBar({
     // Only animate for tool_running / compacting / permission_prompt to avoid
     // a second independent setInterval firing every 120ms alongside the 60ms text flush.
     if (state === "idle" || state === "error" || state === "streaming") return;
-    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 120);
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 200);
     return () => clearInterval(id);
   }, [state]);
 

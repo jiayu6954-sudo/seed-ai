@@ -74,7 +74,12 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
   // growth causes the terminal to add lines to scrollback naturally (normal
   // terminal behaviour); the jitter (flickering) root cause was the isStreaming
   // bug, which is fixed independently.
-  const TAIL_LINES = Math.max(10, termRows - 8);
+  // Dynamic zone budget (must stay < termRows to avoid Ink cursor-tracking drift):
+  //   chrome: 1(tool header) + 1(divider) + 1(status) + 1(hint) + 1(input) + 1(keyhints) + 2(padding) = 8 lines
+  //   safety buffer: 6 lines (spinner repaints every 120ms; ±1 line drift per cycle accumulates)
+  //   TAIL_LINES = termRows - 8 - 6 = termRows - 14
+  // termRows=30 → 16 lines text (readable) with 6-line flicker buffer.
+  const TAIL_LINES = Math.max(8, termRows - 14);
 
   const onPermissionRequest = useCallback((req: PermissionRequest) => setPending(req), []);
   const onStateChange = useCallback((state: AppState) => {
