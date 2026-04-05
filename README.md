@@ -8,11 +8,11 @@
 
 ## Demo
 
-<!-- After publishing: drag-and-drop the video into any GitHub Issue comment,
-     copy the generated CDN URL, and replace the line below with it.
-     GitHub will render it as an inline video player automatically. -->
+https://github.com/user-attachments/assets/7981b487-3d67-42f4-aafb-2cf1de1e3575
 
-> Demo video coming soon — full walkthrough: streaming output, parallel tool execution, real-time diff rendering, model switching, long-term memory recall.
+https://github.com/user-attachments/assets/de6061b3-a7ee-4d3e-bf46-3fade4ab4c37
+
+> Walkthrough: streaming output, parallel tool execution, real-time diff rendering, model switching, long-term memory recall.
 
 ---
 
