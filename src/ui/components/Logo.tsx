@@ -1,11 +1,25 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
 import { useTheme } from "../theme.js";
 
-const _require = createRequire(import.meta.url);
-const _pkg = _require("../../../package.json") as { version: string };
-const VERSION = `v${_pkg.version}`;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Walk up from current file to find package.json (works in both dev and installed)
+let _version = "unknown";
+let _dir = __dirname;
+for (let i = 0; i < 5; i++) {
+  const candidate = path.join(_dir, "package.json");
+  if (fs.existsSync(candidate)) {
+    try { _version = (JSON.parse(fs.readFileSync(candidate, "utf-8")) as { version: string }).version; } catch { /* ignore */ }
+    break;
+  }
+  _dir = path.dirname(_dir);
+}
+const VERSION = `v${_version}`;
 
 /**
  * Sprouting-seed logo — shown on the welcome screen.
