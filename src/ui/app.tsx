@@ -21,23 +21,39 @@ interface AppProps {
 }
 
 /**
- * Cap streaming message to the last `maxLines` lines of text content.
- * Keeps the dynamic zone a fixed height regardless of total output length,
- * eliminating the growing-redraw jitter (Ink erases+rewrites N lines every 60ms).
- * Full content stays in messages state and appears in <Static> once complete.
+ * Constrain the streaming message for the dynamic zone.
+ *
+ * Two passes:
+ *  1. Strip completed tool_use blocks (status !== running/pending).
+ *     Completed tools accumulate as the conversation grows — each carries a
+ *     diff of up to 20 lines, so N tools × 20 lines quickly exceeds termRows,
+ *     causing Ink cursor-tracking to drift and produce the "two-layer" flicker.
+ *     The full tool history appears correctly in <Static> once isStreaming→false.
+ *  2. Truncate the last text block to maxLines (existing behaviour).
  */
 function tailMessage(msg: UIMessage, maxLines: number): UIMessage {
+  // Pass 1: keep only running/pending tool_use; drop completed ones
+  const content: UIMessage["content"] = msg.content.filter((b) => {
+    if (b.type === "tool_use") {
+      return b.status === "running" || b.status === "pending";
+    }
+    return true;
+  });
+
+  // Pass 2: truncate last text block
   let lastTextIdx = -1;
-  for (let i = msg.content.length - 1; i >= 0; i--) {
-    if (msg.content[i]!.type === "text") { lastTextIdx = i; break; }
+  for (let i = content.length - 1; i >= 0; i--) {
+    if (content[i]!.type === "text") { lastTextIdx = i; break; }
   }
-  if (lastTextIdx === -1) return msg;
-  const block = msg.content[lastTextIdx] as { type: "text"; text: string };
-  const lines = block.text.split("\n");
-  if (lines.length <= maxLines) return msg;
-  const newContent = [...msg.content];
-  newContent[lastTextIdx] = { type: "text" as const, text: lines.slice(-maxLines).join("\n") };
-  return { ...msg, content: newContent };
+  if (lastTextIdx !== -1) {
+    const block = content[lastTextIdx] as { type: "text"; text: string };
+    const lines = block.text.split("\n");
+    if (lines.length > maxLines) {
+      content[lastTextIdx] = { type: "text" as const, text: lines.slice(-maxLines).join("\n") };
+    }
+  }
+
+  return { ...msg, content };
 }
 
 export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): React.ReactElement {
