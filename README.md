@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/de6061b3-a7ee-4d3e-bf46-3fade4ab4c37
 | Problem | Seed AI's answer |
 |---------|---------------|
 | Locked into Anthropic's API | 8 providers: OpenAI, DeepSeek, Groq, Gemini, Ollama, OpenRouter, Moonshot, custom |
-| API costs spiral out of control | Tool result cache + LLM compression + local Ollama = 70–90% token reduction in typical sessions |
+| API costs spiral out of control | Tool result cache reduces repeated reads; LLM compression prunes context; local Ollama runs at zero API cost |
 | AI forgets everything between sessions | 3-layer long-term memory + semantic vector retrieval (constant ~800 tokens) |
 | Local LLMs need manual plumbing | Auto-discover Ollama/LM Studio/vLLM, detect tool support, fall back to XML tool calls |
 | `fetch()` breaks on half the web | Native fetch with automatic `curl` fallback — BBC News, Sina Finance all work |
@@ -134,7 +134,7 @@ SEED_DATA_DIR=F:/seed-data seed        # relocate all data off the system drive 
 
 ### From source
 ```bash
-git clone https://github.com/YOUR_USERNAME/seed-ai.git
+git clone https://github.com/jiayu6954-sudo/seed-ai.git
 cd seed-ai
 npm install
 npm run build
@@ -143,6 +143,8 @@ npm link          # makes `seed` available globally
 # Verify
 seed --version
 ```
+
+> **npm package coming soon** — `npx seed-ai` one-liner install is planned once the package is published to the npm registry.
 
 ### Quick start — Anthropic
 ```bash
@@ -281,7 +283,7 @@ Memory Layer
 | **Long-term memory** | 3-layer, Haiku extraction, semantic vector search | None |
 | **Tool result cache** | Session-level, write-before-invalidate | None |
 | **web_fetch fallback** | native → curl auto-downgrade, charset-aware | None |
-| **Context compression** | LLM-powered semantic summary at 80% window | Simple truncation |
+| **Context compression** | LLM-powered semantic summary at 80% window | Conversation compaction via `/compact` (different approach) |
 | **Token budget** | Natural language: `"+500k"`, `"2M tokens"` | Static config only |
 | **Docker sandbox** | 3 isolation levels + graceful host fallback | None |
 | **Storage quotas** | Auto-enforced + SEED_DATA_DIR relocation | None |
