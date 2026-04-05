@@ -132,6 +132,17 @@ SEED_DATA_DIR=F:/seed-data seed        # relocate all data off the system drive 
 - Node.js ≥ 20 (recommend 24+ for native fetch performance)
 - npm ≥ 9
 
+### Try instantly (no install)
+```bash
+npx @jiayu6954/seed-ai@alpha
+```
+
+### Install globally
+```bash
+npm install -g @jiayu6954/seed-ai@alpha
+seed --version
+```
+
 ### From source
 ```bash
 git clone https://github.com/jiayu6954-sudo/seed-ai.git
@@ -139,12 +150,7 @@ cd seed-ai
 npm install
 npm run build
 npm link          # makes `seed` available globally
-
-# Verify
-seed --version
 ```
-
-> **npm package coming soon** — `npx seed-ai` one-liner install is planned once the package is published to the npm registry.
 
 ### Quick start — Anthropic
 ```bash
