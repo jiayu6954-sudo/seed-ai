@@ -12,7 +12,7 @@
  *   - Diff lines coloured with CC's soft rgb() palette (green/red)
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 import { Box, Text } from "ink";
 import type { ToolCallStatus } from "../../types/agent.js";
 import { useTheme, symbols } from "../theme.js";
@@ -41,32 +41,6 @@ function getToolIcon(name: string): string {
   return TOOL_ICON[name] ?? symbols.toolMcp;
 }
 
-// ── Blink hook (CC-style: blink only while running) ────────────────────────
-// Uses 600ms interval aligned to Ink's ~80ms render tick to avoid spurious
-// re-renders that compound the dynamic-zone cursor-tracking drift.
-
-function useBlink(active: boolean): boolean {
-  const [visible, setVisible] = useState(true);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (!active) {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      setVisible(true);
-      return;
-    }
-    // Only create a new timer if not already running
-    if (!timerRef.current) {
-      timerRef.current = setInterval(() => setVisible((v) => !v), 600);
-    }
-    return () => {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    };
-  }, [active]);
-
-  return visible;
-}
-
 // Maximum diff lines rendered in dynamic zone; keeps zone height stable.
 // Full diff is always visible in <Static> once the message is complete.
 const MAX_DIFF_LINES = 20;
@@ -81,20 +55,18 @@ export function ToolCall({ toolName, input, status, result }: ToolCallProps): Re
   const isDenied  = status === "denied";
   const isPending = status === "pending";
 
-  const blinkVisible = useBlink(isRunning);
-
   // ── Bullet color & appearance ──────────────────────────────────────────
+  // No blink animation: setInterval-driven state changes trigger full Ink
+  // repaints at 600ms, causing cursor-tracking drift and the "two-layer"
+  // flicker. Static gold bullet already communicates "in progress" clearly;
+  // the StatusBar spinner handles the global activity indicator.
   const bulletColor =
-    isErr     ? palette.toolError   :
-    isDone && !isDenied ? palette.toolSuccess :
-    isRunning ? palette.toolRunning :
+    isErr               ? palette.toolError   :
+    isDone && !isDenied ? palette.toolSuccess  :
+    isRunning           ? palette.toolRunning  :
     palette.secondary;
 
-  // Running: blink the bullet (show space when invisible phase)
-  // Pending/done: always show bullet but dim for pending/denied
-  const bulletChar = isRunning
-    ? (blinkVisible ? symbols.bullet : " ")
-    : symbols.bullet;
+  const bulletChar = symbols.bullet;
 
   // ── Tool summary line ──────────────────────────────────────────────────
   const summary = summarizeInput(toolName, input);
