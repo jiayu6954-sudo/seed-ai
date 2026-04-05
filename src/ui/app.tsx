@@ -122,12 +122,13 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
             </Box>
           )}
 
-          {/* Streaming message — show last TAIL_LINES lines of current response.
-              tailMessage() prevents the dynamic zone from growing beyond the
-              viewport height (which would send the cursor into scrollback and
-              corrupt Ink's cursor tracking).  At termRows=30, TAIL_LINES=22,
-              giving a large comfortable reading window during streaming.       */}
-          {streamingMessage && (
+          {/* Streaming message — hidden during permission_prompt to keep the
+              dynamic zone height stable. A growing/shrinking zone causes Ink's
+              cursor-tracking to drift by ≥1 line, producing the "two overlapping
+              layers" flicker the user sees when scrolled to the bottom.
+              The full message content is preserved in state and will appear in
+              <Static> once isStreaming → false after the permission is resolved. */}
+          {streamingMessage && appState !== "permission_prompt" && (
             <MessageList
               messages={[tailMessage(streamingMessage, TAIL_LINES)]}
               hiddenAbove={0}
