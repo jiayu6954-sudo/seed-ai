@@ -1,6 +1,7 @@
 # Seed AI
 
 [![CI](https://github.com/jiayu6954-sudo/seed-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jiayu6954-sudo/seed-ai/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40jiayu6954%2Fseed-ai/alpha?label=npm%40alpha)](https://www.npmjs.com/package/@jiayu6954/seed-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
