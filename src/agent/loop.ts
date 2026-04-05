@@ -1,0 +1,323 @@
+import type { AgentLoopOptions, AgentLoopResult, TokenUsage, ConversationMessage } from "../types/agent.js";
+import type { NormalizedBlock } from "../providers/interface.js";
+import type { AIProvider } from "../providers/index.js";
+import type { ToolName } from "../types/tools.js";
+import { StreamHandler } from "./stream.js";
+import { ToolRegistry } from "../tools/registry.js";
+import { PermissionManager } from "../permissions/manager.js";
+import { SessionStats } from "../utils/stats.js";
+import { calculateCost } from "../utils/cost-calculator.js";
+import { logger } from "../utils/logger.js";
+
+const MAX_ITERATIONS = 50;
+
+/**
+ * Innovation 1: Parallel Tool Execution
+ *
+ * 原版（含 Claude Code）的工具执行策略：串行
+ *   ask permission(A) → execute(A) → ask permission(B) → execute(B)
+ *
+ * devai 创新策略：权限串行收集，执行并行化
+ *   ask permission(A) → ask permission(B)   [串行，UX清晰]
+ *         ↓                   ↓
+ *   execute(A)         execute(B)            [并行，速度翻倍]
+ *         ↓                   ↓
+ *         └──────── allSettled ─────────────→ 收集结果
+ */
+export async function runAgentLoop(
+  provider: AIProvider,
+  options: AgentLoopOptions,
+  tools: ToolRegistry,
+  permissions: PermissionManager,
+  stats?: SessionStats
+): Promise<AgentLoopResult> {
+  const messages = [...options.conversationHistory];
+  const totalUsage: TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    estimatedCostUsd: 0,
+  };
+
+  let iterations = 0;
+
+  while (iterations < MAX_ITERATIONS) {
+    iterations++;
+
+    if (options.signal?.aborted) {
+      options.onEvent({ type: "error", error: new Error("Aborted") });
+      break;
+    }
+
+    // ── Innovation 8: token budget hard-limit check ───────────────────────
+    if (options.tokenBudget?.hardLimit !== undefined) {
+      const consumed =
+        (options.tokenBudget.priorTokens ?? 0) +
+        totalUsage.inputTokens +
+        totalUsage.outputTokens;
+      if (consumed >= options.tokenBudget.hardLimit) {
+        const err = new Error(
+          `Token budget exceeded: ${consumed.toLocaleString()} / ${options.tokenBudget.hardLimit.toLocaleString()} tokens used. ` +
+          `Raise tokenBudget.hardLimit in settings or start a new session.`
+        );
+        options.onEvent({ type: "error", error: err });
+        return { finalMessage: { stop_reason: "end_turn", content: [], usage: { input_tokens: 0, output_tokens: 0 } }, updatedHistory: messages, totalUsage };
+      }
+    }
+
+    logger.debug("loop.iteration", { iteration: iterations, messages: messages.length });
+
+    // ── 1. 发起流式请求 ──────────────────────────────────────────────────
+    let streamHandle;
+    try {
+      streamHandle = provider.stream({
+        model: options.model,
+        maxTokens: options.maxTokens,
+        systemPrompt: options.systemPrompt,
+        messages,
+        tools: tools.getDefinitions(),
+        signal: options.signal,
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      logger.error("loop.stream_create.error", err);
+      options.onEvent({ type: "error", error });
+      throw error;
+    }
+
+    // ── 2. 处理流式 delta ────────────────────────────────────────────────
+    const handler = new StreamHandler(options.onEvent);
+    await handler.process(streamHandle, options.signal);
+
+    if (options.signal?.aborted) {
+      options.onEvent({ type: "error", error: new Error("Aborted") });
+      break;
+    }
+
+    // ── 3. 获取完整消息 ──────────────────────────────────────────────────
+    let message;
+    try {
+      message = await streamHandle.finalMessage();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      logger.error("loop.finalMessage.error", err);
+      options.onEvent({ type: "error", error });
+      throw error;
+    }
+
+    // ── 4. 累计 token 用量 ───────────────────────────────────────────────
+    const usage = message.usage;
+    const cacheRead = usage.cache_read_input_tokens ?? 0;
+    const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+
+    totalUsage.inputTokens += usage.input_tokens;
+    totalUsage.outputTokens += usage.output_tokens;
+    totalUsage.cacheReadTokens += cacheRead;
+    totalUsage.cacheWriteTokens += cacheWrite;
+    totalUsage.estimatedCostUsd = calculateCost(options.model, totalUsage);
+
+    stats?.updateUsage({
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens: cacheRead,
+      cacheWriteTokens: cacheWrite,
+    });
+
+    options.onEvent({
+      type: "usage",
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens: cacheRead,
+      cacheWriteTokens: cacheWrite,
+    });
+
+    // ── 5. 追加 assistant 完整 content（转换为 Anthropic 历史格式）────────
+    messages.push(normalizedToHistory(message.content));
+
+    // ── 6. 检查 stop_reason ──────────────────────────────────────────────
+    if (message.stop_reason === "end_turn" || message.stop_reason === "stop_sequence") {
+      options.onEvent({ type: "done", stopReason: message.stop_reason });
+      return { finalMessage: message, updatedHistory: messages, totalUsage };
+    }
+
+    if (message.stop_reason === "max_tokens") {
+      options.onEvent({
+        type: "error",
+        error: new Error(`Max tokens (${options.maxTokens}) reached`),
+      });
+      return { finalMessage: message, updatedHistory: messages, totalUsage };
+    }
+
+    // ── 7. 处理 tool_use（Innovation 1：并行执行）────────────────────────
+    if (message.stop_reason === "tool_use") {
+      const toolUseBlocks = message.content.filter(
+        (b): b is Extract<NormalizedBlock, { type: "tool_use" }> => b.type === "tool_use"
+      );
+
+      const toolResults = await executeToolsWithParallelism(
+        toolUseBlocks,
+        tools,
+        permissions,
+        options.onEvent,
+        stats,
+        options.signal
+      );
+
+      messages.push({ role: "user", content: toolResults });
+      continue;
+    }
+
+    // 未知 stop_reason
+    logger.warn("loop.unexpected_stop_reason", { stopReason: message.stop_reason });
+    options.onEvent({ type: "done", stopReason: message.stop_reason ?? "unknown" });
+    return { finalMessage: message, updatedHistory: messages, totalUsage };
+  }
+
+  const err = new Error(`Agent loop exceeded ${MAX_ITERATIONS} iterations.`);
+  options.onEvent({ type: "error", error: err });
+  throw err;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Convert NormalizedBlock[] → Anthropic-compatible assistant message for history.
+ * The history format is always Anthropic-style internally (works as-is for
+ * Anthropic provider; OpenAI provider converts it back in toOAIMessages()).
+ */
+function normalizedToHistory(content: NormalizedBlock[]): ConversationMessage {
+  return {
+    role: "assistant",
+    content: content.map((block) => {
+      if (block.type === "text") {
+        return { type: "text" as const, text: block.text };
+      }
+      return {
+        type: "tool_use" as const,
+        id: block.id,
+        name: block.name,
+        input: block.input as Record<string, unknown>,
+      };
+    }),
+  };
+}
+
+// ── Innovation 1: Two-phase parallel execution ───────────────────────────────
+
+type ToolUseBlock = Extract<NormalizedBlock, { type: "tool_use" }>;
+type ToolResultParam = { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
+
+async function executeToolsWithParallelism(
+  toolUseBlocks: ToolUseBlock[],
+  tools: ToolRegistry,
+  permissions: PermissionManager,
+  onEvent: AgentLoopOptions["onEvent"],
+  stats: SessionStats | undefined,
+  signal?: AbortSignal
+): Promise<ToolResultParam[]> {
+
+  // Phase 1: serial permission collection
+  type DecisionRecord = { toolBlock: ToolUseBlock; decision: "allow" | "deny" };
+  const decisions: DecisionRecord[] = [];
+
+  for (const toolBlock of toolUseBlocks) {
+    if (signal?.aborted) break;
+
+    const toolName = toolBlock.name as ToolName;
+    onEvent({ type: "tool_start", toolName, toolId: toolBlock.id, input: toolBlock.input });
+
+    let decision: "allow" | "deny";
+    try {
+      const raw = await permissions.request(
+        toolName,
+        toolBlock.input as Parameters<typeof permissions.request>[1]
+      );
+      decision = raw === "allow" || raw === "allow-session" ? "allow" : "deny";
+    } catch {
+      decision = "deny";
+    }
+
+    if (decision === "deny") {
+      onEvent({ type: "tool_denied", toolId: toolBlock.id, toolName });
+    }
+
+    decisions.push({ toolBlock, decision });
+  }
+
+  // Phase 2: parallel execution of approved tools
+  const execTasks = decisions.map(({ toolBlock, decision }) => {
+    if (decision === "deny") {
+      return Promise.resolve<ToolResultParam>({
+        type: "tool_result",
+        tool_use_id: toolBlock.id,
+        content: "Permission denied. Try a different approach or ask the user.",
+        is_error: true,
+      });
+    }
+    return executeSingleTool(toolBlock, tools, onEvent, stats, signal);
+  });
+
+  const settled = await Promise.allSettled(execTasks);
+
+  return settled.map((outcome, i) => {
+    if (outcome.status === "fulfilled") return outcome.value;
+    const toolBlock = toolUseBlocks[i]!;
+    logger.error("tool.parallel.rejected", outcome.reason);
+    return {
+      type: "tool_result" as const,
+      tool_use_id: toolBlock.id,
+      content: `Tool execution rejected unexpectedly: ${String(outcome.reason)}`,
+      is_error: true,
+    };
+  });
+}
+
+async function executeSingleTool(
+  toolBlock: ToolUseBlock,
+  tools: ToolRegistry,
+  onEvent: AgentLoopOptions["onEvent"],
+  stats: SessionStats | undefined,
+  signal?: AbortSignal
+): Promise<ToolResultParam> {
+  const toolName = toolBlock.name as ToolName;
+
+  try {
+    const result = await tools.execute(toolName, toolBlock.input, { signal });
+    stats?.recordToolCall(toolName, result.fromCache, result.isError);
+
+    onEvent({
+      type: "tool_result",
+      toolId: toolBlock.id,
+      toolName,
+      content: result.content,
+      isError: result.isError,
+    });
+
+    return {
+      type: "tool_result",
+      tool_use_id: toolBlock.id,
+      content: result.content,
+      is_error: result.isError,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`tool.${toolName}.unhandled`, err);
+    stats?.recordToolCall(toolName, false, true);
+
+    onEvent({
+      type: "tool_result",
+      toolId: toolBlock.id,
+      toolName,
+      content: `Unexpected error: ${msg}`,
+      isError: true,
+    });
+
+    return {
+      type: "tool_result",
+      tool_use_id: toolBlock.id,
+      content: `Tool execution failed: ${msg}`,
+      is_error: true,
+    };
+  }
+}

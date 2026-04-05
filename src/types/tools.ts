@@ -1,0 +1,88 @@
+export interface ToolDefinition {
+  name: ToolName;
+  description: string;
+  input_schema: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required: string[];
+  };
+}
+
+export type ToolName =
+  | "bash"
+  | "file_read"
+  | "file_write"
+  | "file_edit"
+  | "glob"
+  | "grep"
+  | "web_fetch";
+
+export interface ToolExecutionContext {
+  cwd: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+export interface ToolResult {
+  content: string;
+  isError: boolean;
+  metadata?: {
+    exitCode?: number;
+    truncated?: boolean;
+    bytesRead?: number;
+    matchCount?: number;
+  };
+}
+
+// Typed input shapes for each tool
+export interface BashInput {
+  command: string;
+  timeout?: number;
+}
+
+export interface FileReadInput {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+export interface FileWriteInput {
+  path: string;
+  content: string;
+}
+
+export interface FileEditInput {
+  path: string;
+  oldString: string;
+  newString: string;
+}
+
+export interface GlobInput {
+  pattern: string;
+  path?: string;
+}
+
+export interface GrepInput {
+  pattern: string;
+  path?: string;
+  include?: string;
+  flags?: string;
+}
+
+export interface WebFetchInput {
+  url: string;
+  maxBytes?: number;
+  /** Override the Referer header (useful for APIs that check it, e.g. Sina Finance needs "https://finance.sina.com.cn/") */
+  referer?: string;
+  /** Additional request headers as key:value pairs */
+  headers?: Record<string, string>;
+}
+
+export type ToolInput =
+  | BashInput
+  | FileReadInput
+  | FileWriteInput
+  | FileEditInput
+  | GlobInput
+  | GrepInput
+  | WebFetchInput;
