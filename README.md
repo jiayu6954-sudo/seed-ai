@@ -1,5 +1,9 @@
 # Seed AI
 
+[![CI](https://github.com/jiayu6954-sudo/seed-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jiayu6954-sudo/seed-ai/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
+
 **A production-grade TypeScript CLI AI coding assistant — built from scratch with 14 delivered innovations beyond Claude Code.**
 
 > Not a wrapper. Not a clone. A ground-up reimplementation that systematically analyzed Claude Code's architecture and design patterns, then shipped measurable improvements in every critical dimension.
