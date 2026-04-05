@@ -144,6 +144,22 @@ npm install -g @jiayu6954/seed-ai@alpha
 seed --version
 ```
 
+### 国内用户（中国大陆）
+
+npm 镜像加速安装（推荐，无需代理）：
+```bash
+npx --registry=https://registry.npmmirror.com @jiayu6954/seed-ai@alpha
+```
+或永久设置镜像后正常使用：
+```bash
+npm config set registry https://registry.npmmirror.com
+npm install -g @jiayu6954/seed-ai@alpha
+seed --version
+```
+> **首次安装提示：** 下载过程中终端仅显示旋转等待符号，无详细进度条，属于正常现象，耐心等待 1–3 分钟即可。
+>
+> `git clone github.com` 在国内需要代理，但 npm 安装路径完全绕开 GitHub，直连 npm 镜像即可。
+
 ### From source
 ```bash
 git clone https://github.com/jiayu6954-sudo/seed-ai.git
