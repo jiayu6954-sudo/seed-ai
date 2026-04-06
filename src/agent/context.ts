@@ -116,8 +116,13 @@ export class ContextManager {
       this.summaryHistory.push(summary);
     }
 
-    // Keep only the recent messages
-    this.messages = this.messages.slice(this.messages.length - keepCount);
+    // Keep only the recent messages — then fix orphaned tool messages.
+    // If the slice starts with a user message that contains tool_result blocks,
+    // the corresponding assistant tool_calls message was dropped → API rejects.
+    // Drop leading tool_result-only user messages until we reach a clean boundary.
+    let kept = this.messages.slice(this.messages.length - keepCount);
+    kept = dropOrphanedToolResults(kept);
+    this.messages = kept;
     logger.info("context.compact.done", { remaining: this.messages.length });
   }
 
@@ -132,11 +137,12 @@ export class ContextManager {
     if (dropped <= 0) return;
 
     logger.info("context.compact.simple", { dropped, keepCount });
+    const sliced = dropOrphanedToolResults(this.messages.slice(dropped));
     const placeholder: ConversationMessage = {
       role: "user",
       content: `[系统：${dropped} 条早期消息已压缩以控制token用量。对话从最近 ${keepCount} 条继续。]`,
     };
-    this.messages = [placeholder, ...this.messages.slice(dropped)];
+    this.messages = [placeholder, ...sliced];
   }
 
   clear(): void {
@@ -152,4 +158,25 @@ export class ContextManager {
   get estimatedTokens(): number {
     return this.lastInputTokens;
   }
+}
+
+/**
+ * After slicing history, the first message(s) may be user messages that contain
+ * only tool_result blocks — orphaned because the matching assistant tool_calls
+ * message was removed by the slice. DeepSeek/OpenAI reject such sequences.
+ * Drop those leading orphaned tool-result messages.
+ */
+function dropOrphanedToolResults(msgs: ConversationMessage[]): ConversationMessage[] {
+  let i = 0;
+  while (i < msgs.length) {
+    const msg = msgs[i]!;
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      const allToolResults = msg.content.every(
+        (b) => typeof b === "object" && "type" in b && b.type === "tool_result"
+      );
+      if (allToolResults) { i++; continue; }
+    }
+    break;
+  }
+  return msgs.slice(i);
 }
