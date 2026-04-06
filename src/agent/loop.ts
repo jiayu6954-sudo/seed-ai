@@ -167,14 +167,15 @@ export async function runAgentLoop(
       // If the user denied ALL tools, stop the loop immediately.
       // Without this the agent receives "Permission denied. Try a different approach"
       // and keeps attempting alternative approaches — user sees commands still running.
+      // NOTE: assistant message already pushed at line 136 (normalizedToHistory).
+      // Do NOT push again here — that would create duplicate consecutive assistant
+      // messages which causes API errors and "no output" symptoms.
       if (allDenied) {
-        messages.push({ role: "assistant", content: message.content });
         messages.push({ role: "user", content: toolResults });
         options.onEvent({ type: "done", stopReason: "denied" });
         return { finalMessage: message, updatedHistory: messages, totalUsage };
       }
 
-      messages.push({ role: "assistant", content: message.content });
       messages.push({ role: "user", content: toolResults });
       continue;
     }

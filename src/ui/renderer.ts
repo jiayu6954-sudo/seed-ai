@@ -20,6 +20,18 @@ export function setMouseScrollCallback(cb: MouseScrollCallback): void {
   _mouseScrollCb = cb;
 }
 
+/**
+ * Shift+Enter flag: set by stdin patch when Shift+Enter escape sequence is
+ * detected, read-and-cleared by InputBar's key.return handler to insert a
+ * newline instead of submitting.
+ */
+export let _shiftEnterPending = false;
+export function consumeShiftEnter(): boolean {
+  const v = _shiftEnterPending;
+  _shiftEnterPending = false;
+  return v;
+}
+
 export function renderApp(opts: RenderOptions): void {
   // Primary buffer (NOT alternate screen).
   // Alt-screen (\x1b[?1049h) was removed because:
@@ -111,13 +123,12 @@ export function renderApp(opts: RenderOptions): void {
 
       // ── Shift+Enter ─────────────────────────────────────────────────
       // kitty:  \x1b[13;2u      xterm modifyOtherKeys: \x1b[27;2;13~
-      // Problem: mapping to \n (0x0A) causes Ink to fire key.return=true
-      // (same as plain Enter), so InputBar cannot distinguish them.
-      // Solution: map to \x0e (Ctrl+N, 0x0E) — an unused control char
-      // that Ink passes as input="\x0e" without setting key.return.
-      // InputBar detects \x0e and inserts a newline.
+      // Strategy: set a global flag, then emit \r (plain Enter byte).
+      // Ink fires key.return=true; InputBar reads the flag to decide
+      // whether to insert a newline or submit. Flag is reset each time.
       if (raw.includes("\x1b[13;2u") || raw.includes("\x1b[27;2;13~")) {
-        return origPush(Buffer.from("\x0e"), enc);
+        _shiftEnterPending = true;
+        return origPush(Buffer.from("\r"), enc);
       }
     }
     return origPush(chunk, enc);

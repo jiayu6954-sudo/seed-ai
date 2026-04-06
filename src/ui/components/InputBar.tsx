@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useTheme, symbols } from "../theme.js";
+import { consumeShiftEnter } from "../renderer.js";
 
 interface InputBarProps {
   onSubmit:     (text: string) => void;
@@ -40,24 +41,21 @@ export function InputBar({
   useInput((input, key) => {
     if (disabled) return;
 
-    // Shift+Enter → insert newline (renderer maps Shift+Enter to \x0e / Ctrl+N)
-    // \x0e is used because mapping to \n caused Ink to fire key.return=true,
-    // making Shift+Enter indistinguishable from plain Enter.
-    if (input === "\x0e") {
-      setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
-      setCursorPos((p) => p + 1);
-      return;
-    }
-
-    // Ctrl+J — traditional "newline without submit" shortcut (kept for compatibility)
+    // Ctrl+J — traditional "newline without submit" shortcut
     if (key.ctrl && input === "j") {
       setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
       setCursorPos((p) => p + 1);
       return;
     }
 
-    // Enter → submit
+    // Enter — check Shift+Enter flag first (renderer sets it before emitting \r)
     if (key.return) {
+      if (consumeShiftEnter()) {
+        // Shift+Enter: insert newline instead of submitting
+        setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
+        setCursorPos((p) => p + 1);
+        return;
+      }
       const t = value.trim();
       if (!t) return;
       setHistory((p) => [t, ...p].slice(0, 100));
