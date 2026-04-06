@@ -38,12 +38,17 @@ interface AppProps {
  *  3. Hard-truncate each line to termCols so no line ever wraps.
  */
 function tailMessage(msg: UIMessage, maxVisualLines: number, termCols: number): UIMessage {
-  // Pass 1: keep only running/pending tool_use; drop completed ones
-  const content: UIMessage["content"] = msg.content.filter((b) => {
+  // Pass 1: completed tool_use → compact 1-line text (keeps height stable, avoids Ink cursor drift).
+  // Dropping completed blocks entirely causes a multi-line → 0-line height jump which makes Ink
+  // miscalculate how many lines to erase, leaving ghost content (visible flicker/overlap).
+  const content: UIMessage["content"] = msg.content.map((b) => {
     if (b.type === "tool_use") {
-      return b.status === "running" || b.status === "pending";
+      if (b.status === "running" || b.status === "pending") return b;
+      // Completed: replace with a single-line text so zone height shrinks by N-1 instead of N
+      const sym = b.status === "success" ? "✓" : b.status === "denied" ? "⊘" : "✗";
+      return { type: "text" as const, text: `${sym} ${b.toolName}` };
     }
-    return true;
+    return b;
   });
 
   // Pass 2+3: work on the last text block
@@ -119,7 +124,8 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
     const now = Date.now();
     if (now - renderWindowRef.current >= 1000) {
       const rps = renderCountRef.current;
-      if (rps > 5) {
+      // 80ms flush interval = ~12fps normally. >20 rps means a second source of repaints.
+      if (rps > 20) {
         logger.warn("render.high_frequency", { state: appState, rps, TAIL_LINES, termRows, termCols });
       }
       renderCountRef.current = 0;

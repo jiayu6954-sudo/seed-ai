@@ -9,7 +9,7 @@ import { SessionStats } from "../utils/stats.js";
 import { calculateCost } from "../utils/cost-calculator.js";
 import { logger } from "../utils/logger.js";
 
-const MAX_ITERATIONS = 50;
+const MAX_ITERATIONS = 200;
 
 /**
  * Innovation 1: Parallel Tool Execution
