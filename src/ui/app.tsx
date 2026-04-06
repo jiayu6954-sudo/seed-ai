@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Box, Text, Static, useInput, useApp, useStdout } from "ink";
 import type { DevAISettings } from "../types/config.js";
 import type { AppState } from "../types/ui.js";
@@ -12,6 +12,7 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Logo } from "./components/Logo.js";
 import { ThemeContext, getPalette } from "./theme.js";
 import { setMouseScrollCallback } from "./renderer.js";
+import { logger } from "../utils/logger.js";
 
 interface AppProps {
   settings: DevAISettings;
@@ -110,6 +111,22 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
   // termRows=30 → 16 lines text (readable) with 6-line flicker buffer.
   const TAIL_LINES = Math.max(8, termRows - 14);
 
+  // I018: Render self-monitoring — track repaints/sec and log state transitions
+  const renderCountRef  = useRef(0);
+  const renderWindowRef = useRef(Date.now());
+  renderCountRef.current++;
+  {
+    const now = Date.now();
+    if (now - renderWindowRef.current >= 1000) {
+      const rps = renderCountRef.current;
+      if (rps > 5) {
+        logger.warn("render.high_frequency", { state: appState, rps, TAIL_LINES, termRows, termCols });
+      }
+      renderCountRef.current = 0;
+      renderWindowRef.current = now;
+    }
+  }
+
   const onPermissionRequest = useCallback((req: PermissionRequest) => setPending(req), []);
   const onStateChange = useCallback((state: AppState) => {
     setAppState(state);
@@ -137,6 +154,17 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
   useInput((_in, key) => {
     if (key.ctrl && _in === "c") { appState !== "idle" ? abort() : exit(); }
   });
+
+  // I018: Log state transitions with zone height info for flicker diagnosis
+  useEffect(() => {
+    const dynamicZoneEst = TAIL_LINES + 5;
+    logger.info("render.state_change", {
+      state: appState, TAIL_LINES, termRows, termCols,
+      dynamicZoneEst,
+      overflowRisk: dynamicZoneEst >= termRows,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appState]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (initialPrompt) submit(initialPrompt); }, []);

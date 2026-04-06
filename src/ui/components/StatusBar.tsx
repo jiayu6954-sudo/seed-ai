@@ -51,10 +51,10 @@ export function StatusBar({
   const t0 = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    // During streaming, text appearing IS the feedback — no spinner timer needed.
-    // Only animate for tool_running / compacting / permission_prompt to avoid
-    // a second independent setInterval firing every 120ms alongside the 60ms text flush.
-    if (state === "idle" || state === "error" || state === "streaming") return;
+    // No timer during: idle, error, streaming (text IS feedback), permission_prompt
+    // (user reading Y/S/N — any repaint causes cursor-tracking drift → flicker).
+    // Only animate for tool_running and compacting.
+    if (state === "idle" || state === "error" || state === "streaming" || state === "permission_prompt") return;
     const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 200);
     return () => clearInterval(id);
   }, [state]);
@@ -62,10 +62,9 @@ export function StatusBar({
   React.useEffect(() => {
     if (state === "idle" || state === "error") { t0.current = null; setElapsed(0); return; }
     if (!t0.current) t0.current = Date.now();
-    // During streaming, text appearing IS the progress feedback — suppress elapsed
-    // timer to eliminate one source of independent re-renders that cause cursor drift.
-    if (state === "streaming") return;
-    // Elapsed timer fires every 1s — acceptable for tool_running / compacting
+    // Suppress elapsed timer during streaming and permission_prompt:
+    // each setElapsed triggers an Ink repaint of the dynamic zone.
+    if (state === "streaming" || state === "permission_prompt") return;
     const id = setInterval(() => {
       if (t0.current) setElapsed(Math.floor((Date.now() - t0.current) / 1000));
     }, 1000);
