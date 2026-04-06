@@ -15,6 +15,9 @@
  *  - Tab-completion list is derived from the registry automatically
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import type { TokenUsage } from "../types/agent.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -163,6 +166,43 @@ const COMMANDS: CommandDef[] = [
           `  Tip: Seed AI automatically updates memory at session end.`,
         ].join("\n"),
       };
+    },
+  },
+  {
+    name: "diag",
+    description: "Show recent errors from ~/.seed/debug.log (last 30 WARN/ERROR lines)",
+    handler: (_args, _ctx) => {
+      const dataDir = process.env["SEED_DATA_DIR"] ?? path.join(os.homedir(), ".seed");
+      const logFile = path.join(dataDir, "debug.log");
+      try {
+        if (!fs.existsSync(logFile)) {
+          return { type: "message", text: "── Diagnostics ────────────────────────\n  No debug.log found — no errors recorded.\n──────────────────────────────────────" };
+        }
+        const all = fs.readFileSync(logFile, "utf-8").split("\n");
+        const errors = all
+          .filter((l) => l.includes("[WARN") || l.includes("[ERROR"))
+          .slice(-30);
+        if (errors.length === 0) {
+          return { type: "message", text: "── Diagnostics ────────────────────────\n  No warnings or errors in recent log.\n──────────────────────────────────────" };
+        }
+        // Compact format: strip JSON payload to keep lines readable
+        const compact = errors.map((l) => {
+          const m = l.match(/\[(WARN|ERROR)\s+([0-9T:.Z-]+)\]\s+(\S+)/);
+          if (!m) return l.slice(0, 120);
+          return `${m[1]} ${m[2]!.slice(11, 19)} ${m[3]}`;
+        });
+        return {
+          type: "message",
+          text: [
+            `── Recent Errors (${errors.length}) ─────────────────`,
+            ...compact,
+            `──────────────────────────────────────`,
+            `  Full log: ${logFile}`,
+          ].join("\n"),
+        };
+      } catch (e) {
+        return { type: "message", text: `── Diagnostics ────────────────────────\n  Failed to read log: ${String(e)}\n──────────────────────────────────────` };
+      }
     },
   },
   {

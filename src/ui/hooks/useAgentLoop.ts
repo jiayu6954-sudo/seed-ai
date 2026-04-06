@@ -526,20 +526,31 @@ export function useAgentLoop({
           session.messages.push(msg);
         }
 
-        // Innovation 3: LLM-powered smart compaction when context is large
+        // Innovation 3: LLM-powered smart compaction when context is large.
+        // Requires Anthropic API key (uses Haiku for summarization).
+        // Skip gracefully if no key — falls back to simple truncation via append().
         if (contextManagerRef.current.shouldCompact()) {
-          onStateChange("compacting");
-          await contextManagerRef.current.compactWithSummary(anthropicKey);
-          onStateChange("idle");
+          if (anthropicKey) {
+            onStateChange("compacting");
+            await contextManagerRef.current.compactWithSummary(anthropicKey);
+            onStateChange("idle");
+          } else {
+            // No Anthropic key (e.g. using DeepSeek/Groq): simple truncation, no summary
+            contextManagerRef.current.compact();
+          }
         }
 
-        // Innovation 7: extract and persist long-term memory (fire-and-forget, non-blocking)
-        extractAndSaveMemory(
-          cwd,
-          contextManagerRef.current.getHistory(),
-          anthropicKey,
-          settings.memory.enabled
-        ).catch((err) => logger.warn("memory.extract.background_error", err));
+        // Innovation 7: extract and persist long-term memory.
+        // Only runs if memory is enabled AND Anthropic key is available.
+        // Without the key, the Haiku call would 403 — skip silently to avoid log spam.
+        if (settings.memory.enabled && anthropicKey) {
+          extractAndSaveMemory(
+            cwd,
+            contextManagerRef.current.getHistory(),
+            anthropicKey,
+            true
+          ).catch((err) => logger.warn("memory.extract.background_error", err));
+        }
 
         await saveSession(session);
       } catch (err) {
