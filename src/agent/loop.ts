@@ -155,7 +155,7 @@ export async function runAgentLoop(
         (b): b is Extract<NormalizedBlock, { type: "tool_use" }> => b.type === "tool_use"
       );
 
-      const toolResults = await executeToolsWithParallelism(
+      const { results: toolResults, allDenied } = await executeToolsWithParallelism(
         toolUseBlocks,
         tools,
         permissions,
@@ -164,6 +164,17 @@ export async function runAgentLoop(
         options.signal
       );
 
+      // If the user denied ALL tools, stop the loop immediately.
+      // Without this the agent receives "Permission denied. Try a different approach"
+      // and keeps attempting alternative approaches — user sees commands still running.
+      if (allDenied) {
+        messages.push({ role: "assistant", content: message.content });
+        messages.push({ role: "user", content: toolResults });
+        options.onEvent({ type: "done", stopReason: "denied" });
+        return { finalMessage: message, updatedHistory: messages, totalUsage };
+      }
+
+      messages.push({ role: "assistant", content: message.content });
       messages.push({ role: "user", content: toolResults });
       continue;
     }
@@ -215,7 +226,7 @@ async function executeToolsWithParallelism(
   onEvent: AgentLoopOptions["onEvent"],
   stats: SessionStats | undefined,
   signal?: AbortSignal
-): Promise<ToolResultParam[]> {
+): Promise<{ results: ToolResultParam[]; allDenied: boolean }> {
 
   // Phase 1: serial permission collection
   type DecisionRecord = { toolBlock: ToolUseBlock; decision: "allow" | "deny" };
@@ -260,7 +271,7 @@ async function executeToolsWithParallelism(
 
   const settled = await Promise.allSettled(execTasks);
 
-  return settled.map((outcome, i) => {
+  const results = settled.map((outcome, i) => {
     if (outcome.status === "fulfilled") return outcome.value;
     const toolBlock = toolUseBlocks[i]!;
     logger.error("tool.parallel.rejected", outcome.reason);
@@ -271,6 +282,9 @@ async function executeToolsWithParallelism(
       is_error: true,
     };
   });
+
+  const allDenied = decisions.length > 0 && decisions.every((d) => d.decision === "deny");
+  return { results, allDenied };
 }
 
 async function executeSingleTool(

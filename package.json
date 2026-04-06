@@ -1,6 +1,6 @@
 {
   "name": "@jiayu6954/seed-ai",
-  "version": "0.9.1-alpha.8",
+  "version": "0.9.1-alpha.9",
   "description": "Production-grade TypeScript CLI AI coding assistant with long-term memory, multi-provider support, and local LLM integration",
   "type": "module",
   "bin": {

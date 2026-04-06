@@ -126,7 +126,12 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
   }, []);
 
   const onDecide = useCallback((d: PermissionDecision) => {
-    setPending(null); setAppState("streaming"); resolvePermission(d);
+    setPending(null);
+    // Always set streaming — the agent loop continues after resolvePermission()
+    // regardless of allow/deny (deny returns an error tool_result, agent responds).
+    // This keeps InputBar disabled while the agent processes the decision.
+    setAppState("streaming");
+    resolvePermission(d);
   }, [resolvePermission]);
 
   useInput((_in, key) => {
