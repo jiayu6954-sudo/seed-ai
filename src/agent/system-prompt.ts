@@ -122,6 +122,26 @@ async function getEnvSection(
 
   const osInfo = `${os.type()} ${os.release()}`;
 
+  // Auto-detect Python — check common locations so the LLM uses the right path
+  // instead of trying to install a new Python or guessing wrong paths.
+  let pythonInfo = "not detected";
+  const pythonCandidates = platform === "win32"
+    ? ["python", "python3", "py"]
+    : ["python3", "python"];
+  for (const cmd of pythonCandidates) {
+    try {
+      const ver = execSync(`${cmd} --version 2>&1`, { encoding: "utf-8", timeout: 3000 }).trim();
+      if (ver.includes("Python")) {
+        const loc = execSync(
+          platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd}`,
+          { encoding: "utf-8", timeout: 3000 }
+        ).trim().split("\n")[0] ?? cmd;
+        pythonInfo = `${ver} at ${loc} (use \`${cmd}\` or full path)`;
+        break;
+      }
+    } catch { /* not found, try next */ }
+  }
+
   const lines = [
     `Working directory: ${cwd}`,
     `Is directory a git repo: ${isGit ? "Yes" : "No"}`,
@@ -129,6 +149,7 @@ async function getEnvSection(
     `Shell: ${shell}`,
     `OS Version: ${osInfo}`,
     `Node.js: ${process.version}`,
+    `Python: ${pythonInfo}`,
   ];
 
   return `<env>

@@ -23,15 +23,20 @@ interface AppProps {
 /**
  * Constrain the streaming message for the dynamic zone.
  *
- * Two passes:
+ * Root cause of flicker: Ink re-renders by moving cursor up N lines and
+ * rewriting. N = number of logical React lines. But the TERMINAL wraps
+ * long lines automatically: a 160-char line in an 80-col terminal takes
+ * 2 visual rows but Ink counts it as 1. This discrepancy causes Ink's
+ * cursor to land in the wrong position → old content not fully erased →
+ * "two overlapping layers". This worsens as responses grow longer.
+ *
+ * Three passes:
  *  1. Strip completed tool_use blocks (status !== running/pending).
- *     Completed tools accumulate as the conversation grows — each carries a
- *     diff of up to 20 lines, so N tools × 20 lines quickly exceeds termRows,
- *     causing Ink cursor-tracking to drift and produce the "two-layer" flicker.
- *     The full tool history appears correctly in <Static> once isStreaming→false.
- *  2. Truncate the last text block to maxLines (existing behaviour).
+ *  2. Truncate the last text block counting VISUAL lines (not logical),
+ *     accounting for terminal-width wrapping.
+ *  3. Hard-truncate each line to termCols so no line ever wraps.
  */
-function tailMessage(msg: UIMessage, maxLines: number): UIMessage {
+function tailMessage(msg: UIMessage, maxVisualLines: number, termCols: number): UIMessage {
   // Pass 1: keep only running/pending tool_use; drop completed ones
   const content: UIMessage["content"] = msg.content.filter((b) => {
     if (b.type === "tool_use") {
@@ -40,16 +45,40 @@ function tailMessage(msg: UIMessage, maxLines: number): UIMessage {
     return true;
   });
 
-  // Pass 2: truncate last text block
+  // Pass 2+3: work on the last text block
   let lastTextIdx = -1;
   for (let i = content.length - 1; i >= 0; i--) {
     if (content[i]!.type === "text") { lastTextIdx = i; break; }
   }
   if (lastTextIdx !== -1) {
     const block = content[lastTextIdx] as { type: "text"; text: string };
-    const lines = block.text.split("\n");
-    if (lines.length > maxLines) {
-      content[lastTextIdx] = { type: "text" as const, text: lines.slice(-maxLines).join("\n") };
+    const logicalLines = block.text.split("\n");
+
+    // Expand each logical line into visual lines (terminal wrapping simulation)
+    const visualLines: string[] = [];
+    for (const line of logicalLines) {
+      if (line.length === 0) {
+        visualLines.push("");
+      } else {
+        // A line of length L takes ceil(L / termCols) visual rows
+        const cols = Math.max(1, termCols - 4); // -4 for paddingX={2} on each side
+        for (let i = 0; i < line.length; i += cols) {
+          visualLines.push(line.slice(i, i + cols));
+        }
+      }
+    }
+
+    if (visualLines.length > maxVisualLines) {
+      // Keep last maxVisualLines visual rows
+      const kept = visualLines.slice(-maxVisualLines).join("\n");
+      content[lastTextIdx] = { type: "text" as const, text: kept };
+    } else {
+      // Pass 3: hard-truncate each line to cols even if we didn't need to trim
+      const cols = Math.max(1, termCols - 4);
+      const truncated = logicalLines
+        .map((l) => l.length > cols ? l.slice(0, cols) : l)
+        .join("\n");
+      content[lastTextIdx] = { type: "text" as const, text: truncated };
     }
   }
 
@@ -151,7 +180,7 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
               <Static> once isStreaming → false after the permission is resolved. */}
           {streamingMessage && appState !== "permission_prompt" && (
             <MessageList
-              messages={[tailMessage(streamingMessage, TAIL_LINES)]}
+              messages={[tailMessage(streamingMessage, TAIL_LINES, termCols)]}
               hiddenAbove={0}
               showThinking={settings.ui.showThinking}
             />

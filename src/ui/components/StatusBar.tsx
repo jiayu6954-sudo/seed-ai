@@ -62,7 +62,10 @@ export function StatusBar({
   React.useEffect(() => {
     if (state === "idle" || state === "error") { t0.current = null; setElapsed(0); return; }
     if (!t0.current) t0.current = Date.now();
-    // Elapsed timer fires every 1s — low frequency, acceptable during all states
+    // During streaming, text appearing IS the progress feedback — suppress elapsed
+    // timer to eliminate one source of independent re-renders that cause cursor drift.
+    if (state === "streaming") return;
+    // Elapsed timer fires every 1s — acceptable for tool_running / compacting
     const id = setInterval(() => {
       if (t0.current) setElapsed(Math.floor((Date.now() - t0.current) / 1000));
     }, 1000);
