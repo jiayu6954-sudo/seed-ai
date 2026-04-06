@@ -40,18 +40,24 @@ export function InputBar({
   useInput((input, key) => {
     if (disabled) return;
 
-    // Enter → submit; Shift+Enter or \n → insert newline
+    // Shift+Enter → insert newline (renderer maps Shift+Enter to \x0e / Ctrl+N)
+    // \x0e is used because mapping to \n caused Ink to fire key.return=true,
+    // making Shift+Enter indistinguishable from plain Enter.
+    if (input === "\x0e") {
+      setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
+      setCursorPos((p) => p + 1);
+      return;
+    }
+
+    // Ctrl+J — traditional "newline without submit" shortcut (kept for compatibility)
+    if (key.ctrl && input === "j") {
+      setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
+      setCursorPos((p) => p + 1);
+      return;
+    }
+
+    // Enter → submit
     if (key.return) {
-      // Ink doesn't expose key.shift directly; detect Shift+Enter via the
-      // raw escape sequence: terminals send \x1b[27;2;13~ or simply pass
-      // \n when Shift is held. We check key.shift (some terminals set it)
-      // OR if the raw input byte is \n (0x0A) which some terminals send.
-      if ((key as { shift?: boolean }).shift || input === "\n") {
-        const nl = "\n";
-        setValue((p) => p.slice(0, cursorPos) + nl + p.slice(cursorPos));
-        setCursorPos((p) => p + 1);
-        return;
-      }
       const t = value.trim();
       if (!t) return;
       setHistory((p) => [t, ...p].slice(0, 100));
@@ -59,13 +65,6 @@ export function InputBar({
       setValue("");
       setCursorPos(0);
       onSubmit(t);
-      return;
-    }
-
-    // Ctrl+J is the traditional "newline without submit" shortcut (0x0A)
-    if (key.ctrl && input === "j") {
-      setValue((p) => p.slice(0, cursorPos) + "\n" + p.slice(cursorPos));
-      setCursorPos((p) => p + 1);
       return;
     }
 

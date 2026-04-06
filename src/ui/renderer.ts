@@ -111,10 +111,13 @@ export function renderApp(opts: RenderOptions): void {
 
       // ── Shift+Enter ─────────────────────────────────────────────────
       // kitty:  \x1b[13;2u      xterm modifyOtherKeys: \x1b[27;2;13~
-      // Map to \n (0x0A) so Ink decodes it as Ctrl+J, which InputBar
-      // already handles as "insert newline without submitting".
+      // Problem: mapping to \n (0x0A) causes Ink to fire key.return=true
+      // (same as plain Enter), so InputBar cannot distinguish them.
+      // Solution: map to \x0e (Ctrl+N, 0x0E) — an unused control char
+      // that Ink passes as input="\x0e" without setting key.return.
+      // InputBar detects \x0e and inserts a newline.
       if (raw.includes("\x1b[13;2u") || raw.includes("\x1b[27;2;13~")) {
-        return origPush(Buffer.from("\n"), enc);
+        return origPush(Buffer.from("\x0e"), enc);
       }
     }
     return origPush(chunk, enc);
