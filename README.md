@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
-**A production-grade TypeScript CLI AI coding assistant — built from scratch with 14 delivered innovations beyond Claude Code.**
+**A production-grade TypeScript CLI AI coding assistant — built from scratch with 20 delivered innovations beyond Claude Code.**
 
 > Not a wrapper. Not a clone. A ground-up reimplementation that systematically analyzed Claude Code's architecture and design patterns, then shipped measurable improvements in every critical dimension.
 
@@ -43,7 +43,7 @@ https://github.com/user-attachments/assets/de6061b3-a7ee-4d3e-bf46-3fade4ab4c37
 - **Session-level tool cache** — idempotent reads (`file_read`, `glob`, `grep`, `web_fetch`) cached; write ops invalidate before execution to prevent stale reads
 - **LLM-driven context compression** — triggers at 80% context window; Haiku ($0.0002/compress) summarizes pruned messages into system prompt; multi-round cumulative summaries preserved
 - **Token Budget Guard** — natural language budget (`"+500k"`, `"2M tokens"`) parsed inline, hard limit enforced per loop iteration
-- **50-iteration loop** with Ctrl+C abort, streaming output, real-time diff rendering
+- **200-iteration loop** with Ctrl+C abort, streaming output, real-time diff rendering
 
 ### Multi-Provider Support
 ```bash
@@ -118,12 +118,15 @@ SEED_DATA_DIR=F:/seed-data seed        # relocate all data off the system drive 
 ### Slash Commands
 | Command | Description |
 |---------|-------------|
-| `/clear` | Reset context |
+| `/clear` | Reset context and start fresh |
 | `/compact` | Force LLM compression |
 | `/cost` | Token usage + estimated cost |
-| `/help` | All commands and shortcuts |
-| `/model` | Current provider/model |
-| `/memory` | Loaded memory entries |
+| `/help` | All commands and keyboard shortcuts |
+| `/model` | Current provider/model/cwd |
+| `/memory` | Loaded long-term memory entries |
+| `/status` | Session statistics overview |
+| `/diag` | Show last 30 WARN/ERROR lines from `~/.seed/debug.log` |
+| `/init` | Scan project and create `CLAUDE.md` context scaffold |
 
 ---
 
@@ -317,7 +320,7 @@ Memory Layer
 
 | Dimension | Claude Code advantage | Seed AI roadmap |
 |-----------|----------------------|---------------|
-| **Hooks system** | `PreToolUse` / `PostSampling` programmable hooks | I015 — next priority |
+| **Hooks system** | `PreToolUse` / `PostSampling` programmable hooks | I021 — next priority |
 | **Plan Mode** | Read-only planning mode | Planned |
 | **VSCode integration** | Full IDE extension + inline code | Out of scope (CLI-first positioning) |
 | **Permission granularity** | Tool-level + path-level, session learning | Iterating |
@@ -342,14 +345,20 @@ npm run typecheck   # tsc --noEmit, strict mode
 
 | ID | Feature | Status |
 |----|---------|--------|
-| I001–I013 | Parallel exec, cache, LLM compression, memory, sandbox, MCP, budget, system prompt, local LLM, vector memory, model switcher | Done |
-| I016 | Storage Guard + SEED_DATA_DIR | Done (v0.9.1) |
-| ~~I014~~ | ~~Out-of-process LLM compression~~ | Dropped — I012 fixed the root cause; UI Spinner handles the rare freeze |
-| I015 | Hooks system: `PreToolUse` / `PostToolUse` shell scripts, executed inside Docker sandbox (security constraint) | Next |
-| — | Plan Mode: read-only planning, no tool execution until user confirms | Planned |
+| I001–I013 | Parallel exec, cache, LLM compression, memory, sandbox, MCP, budget, system prompt, local LLM, vector memory, model switcher | ✅ Done |
+| I016 | Storage Guard + SEED_DATA_DIR | ✅ Done (v0.9.1) |
+| I015 | Static/Dynamic Ink rendering split — zero-repaint completed messages | ✅ Done (v0.9.1-alpha.15) |
+| I016 | Timer suppression for zero-flicker permission prompts | ✅ Done (v0.9.1-alpha.15) |
+| I017 | `/diag` in-session log reader — diagnose without describing symptoms | ✅ Done (v0.9.1-alpha.16) |
+| I018 | Render self-monitoring — rps tracking, state transition logging | ✅ Done (v0.9.1-alpha.16) |
+| I019 | `/init` project context scaffold → CLAUDE.md | ✅ Done (v0.9.1-alpha.22) |
+| I020 | Industrial workflow awareness — 6-phase delivery + document generation | ✅ Done (v0.9.1-alpha.21) |
+| I021 | Hooks system: `PreToolUse` / `PostToolUse` | Next |
+| — | Plan Mode: read-only planning, user confirms execution | Planned |
+| — | Session persistence (transcript restore) | Planned |
 | — | Integration test suite | Help wanted |
 
-> **v0.9.1-r6** — Streaming rendering architecture finalized: Static/Dynamic split, isStreaming atomization fix, TAIL_LINES sized to viewport.
+> **v0.9.1-alpha.22** — 20 innovations shipped. Key stability fixes: cross-provider memory extraction, tool message boundary cleaning, max_tokens auto-continue with dummy tool_results, 200-iteration loop.
 
 ---
 
@@ -366,6 +375,7 @@ We welcome bug reports, feature ideas, and pull requests. Please read [CONTRIBUT
 - Integration tests for the agent loop (end-to-end with real API calls)
 - Windows-specific edge cases (path handling, terminal encoding)
 - Additional local LLM provider testing
+- I021 Hooks system implementation
 
 ---
 
@@ -373,7 +383,7 @@ We welcome bug reports, feature ideas, and pull requests. Please read [CONTRIBUT
 
 Seed AI was built by systematically studying Claude Code's architecture, design patterns, and engineering decisions. The color system, diff rendering values, and MCP protocol integration are informed by that study. This project stands on the shoulders of Anthropic's engineering work — the goal is to push the open-source ecosystem forward, not to compete with or diminish it.
 
-14 delivered innovations (I001–I013, I016) are fully documented in [WHITEPAPER.md](WHITEPAPER.md). I014 was evaluated and dropped; I015 (Hooks system) is the next priority.
+20 delivered innovations (I001–I020) are documented in [WHITEPAPER.md](WHITEPAPER.md). Real-world validation: [CDN Edge System Case Study](CASE_STUDY_CDN.md) — building a production CDN gateway from scratch using Seed AI as the sole engineering assistant.
 
 ---
 
