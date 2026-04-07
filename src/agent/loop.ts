@@ -142,11 +142,32 @@ export async function runAgentLoop(
     }
 
     if (message.stop_reason === "max_tokens") {
-      // Auto-continue: inject a user message asking the model to carry on.
-      // The previous assistant content is already in history (line 136).
-      // This avoids the hard stop at 16k tokens that caused "amnesia" mid-task.
-      logger.info("loop.max_tokens_continue", { iteration: iterations, maxTokens: options.maxTokens });
+      // Auto-continue — but ONLY if the assistant message has no tool_calls.
+      // When max_tokens hits mid-tool_call JSON the content contains tool_use blocks
+      // with potentially malformed input. Injecting "continue" without tool_result
+      // responses violates OAI message ordering → DeepSeek/OpenAI 400.
+      // In that case: inject dummy error tool_results first, then the continue prompt.
+      const pendingToolUses = message.content.filter((b) => b.type === "tool_use") as
+        Array<{ type: "tool_use"; id: string; name: string; input: unknown }>;
+
+      logger.info("loop.max_tokens_continue", {
+        iteration: iterations,
+        maxTokens: options.maxTokens,
+        pendingTools: pendingToolUses.length,
+      });
       options.onEvent({ type: "text_delta", delta: "\n[output truncated — continuing…]\n" });
+
+      if (pendingToolUses.length > 0) {
+        // Inject dummy tool_results so the message sequence stays valid
+        const dummyResults = pendingToolUses.map((b) => ({
+          type: "tool_result" as const,
+          tool_use_id: b.id,
+          content: "[truncated: output limit reached before tool could be called]",
+          is_error: true,
+        }));
+        messages.push({ role: "user", content: dummyResults });
+      }
+
       messages.push({
         role: "user",
         content: "You were cut off due to the output length limit. Continue exactly from where you left off, without repeating anything.",

@@ -87,37 +87,43 @@ export class ContextManager {
       keepCount,
     });
 
-    // Generate summary using the current provider (works for any provider)
-    let summary = "";
+    // Generate summary using the current provider (works for any provider).
+    // Clean messages first: DeepSeek/OAI reject orphaned tool_result (no preceding
+    // tool_calls) and trailing tool_calls (no following tool_results).
     try {
-      const summaryMessages: ConversationMessage[] = [
-        ...toSummarize,
-        {
-          role: "user",
-          content:
-            "请总结以上对话中的关键内容，以便在后续对话中参考。重点：做了什么、发现了什么、当前状态。不超过400字。",
-        },
-      ];
-      const handle = provider.stream({
-        model,
-        maxTokens: SUMMARY_MAX_TOKENS,
-        systemPrompt:
-          "你是一个对话摘要助手。从AI编程助手的对话历史中提取关键信息。" +
-          "输出简洁摘要，包含：已完成的操作、发现的问题、重要决策、当前状态。不超过400字。",
-        messages: summaryMessages,
-        tools: [],
-      });
-      const msg = await handle.finalMessage();
-      const textBlock = msg.content.find((b) => b.type === "text");
-      if (textBlock?.type === "text") {
-        summary = textBlock.text;
-        this.summaryHistory.push(summary);
-        logger.info("context.compact.summary_generated", { length: summary.length });
+      let cleanedForSummary = dropOrphanedToolResults(toSummarize);
+      cleanedForSummary = dropTrailingToolCalls(cleanedForSummary);
+
+      if (cleanedForSummary.length === 0) {
+        this.summaryHistory.push(`[${toSummarize.length} 条早期消息已压缩]`);
+      } else {
+        const summaryMessages: ConversationMessage[] = [
+          ...cleanedForSummary,
+          {
+            role: "user",
+            content:
+              "请总结以上对话中的关键内容，以便在后续对话中参考。重点：做了什么、发现了什么、当前状态。不超过400字。",
+          },
+        ];
+        const handle = provider.stream({
+          model,
+          maxTokens: SUMMARY_MAX_TOKENS,
+          systemPrompt:
+            "你是一个对话摘要助手。从AI编程助手的对话历史中提取关键信息。" +
+            "输出简洁摘要，包含：已完成的操作、发现的问题、重要决策、当前状态。不超过400字。",
+          messages: summaryMessages,
+          tools: [],
+        });
+        const msg = await handle.finalMessage();
+        const textBlock = msg.content.find((b) => b.type === "text");
+        if (textBlock?.type === "text") {
+          this.summaryHistory.push(textBlock.text);
+          logger.info("context.compact.summary_generated", { length: textBlock.text.length });
+        }
       }
     } catch (err) {
       logger.warn("context.compact.summary_failed", err);
-      summary = `[摘要生成失败：${toSummarize.length} 条早期消息已删除]`;
-      this.summaryHistory.push(summary);
+      this.summaryHistory.push(`[摘要生成失败：${toSummarize.length} 条早期消息已删除]`);
     }
 
     // Keep only the recent messages — then fix orphaned tool messages.
@@ -183,4 +189,25 @@ function dropOrphanedToolResults(msgs: ConversationMessage[]): ConversationMessa
     break;
   }
   return msgs.slice(i);
+}
+
+/**
+ * Drop trailing assistant messages that contain tool_use blocks without
+ * corresponding tool_result responses. This happens when max_tokens cuts
+ * off mid-tool_call or when the slice end falls between tool_calls and
+ * tool_results. DeepSeek/OAI reject such sequences with 400.
+ */
+function dropTrailingToolCalls(msgs: ConversationMessage[]): ConversationMessage[] {
+  let end = msgs.length;
+  while (end > 0) {
+    const msg = msgs[end - 1]!;
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      const hasToolUse = msg.content.some(
+        (b) => typeof b === "object" && "type" in b && b.type === "tool_use"
+      );
+      if (hasToolUse) { end--; continue; }
+    }
+    break;
+  }
+  return msgs.slice(0, end);
 }
