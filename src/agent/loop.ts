@@ -162,16 +162,30 @@ export async function runAgentLoop(
         const dummyResults = pendingToolUses.map((b) => ({
           type: "tool_result" as const,
           tool_use_id: b.id,
-          content: "[truncated: output limit reached before tool could be called]",
+          content: "[truncated: output limit reached mid-tool]",
           is_error: true,
         }));
         messages.push({ role: "user", content: dummyResults });
-      }
 
-      messages.push({
-        role: "user",
-        content: "You were cut off due to the output length limit. Continue exactly from where you left off, without repeating anything.",
-      });
+        // Tool-specific continue: tell the model to resume writing the file,
+        // NOT to reconsider its approach or offer a simplified version.
+        const toolNames = pendingToolUses.map((b) => b.name).join(", ");
+        const isFileWrite = pendingToolUses.some(
+          (b) => b.name === "file_write" || b.name === "file_edit"
+        );
+        const continueMsg = isFileWrite
+          ? "The file write was cut off due to output length. Do NOT offer a simplified version. " +
+            "Write the NEXT section of the document directly using file_write (append mode or a new section file). " +
+            "Continue the full content without repeating what was already written."
+          : `The tool call (${toolNames}) was cut off. Resume the task from where you left off.`;
+
+        messages.push({ role: "user", content: continueMsg });
+      } else {
+        messages.push({
+          role: "user",
+          content: "You were cut off due to the output length limit. Continue exactly from where you left off, without repeating anything.",
+        });
+      }
       continue;
     }
 

@@ -95,10 +95,11 @@ If you can say it in one sentence, don't use three.
 
 # Document generation (EXCEPTION to conciseness rules)
 When the user explicitly requests a document, report, whitepaper, specification, README, or any long-form written artifact:
- - NEVER offer a "simplified", "condensed", or "brief" version unless the user asks for one.
- - Write the COMPLETE, FULL document in a single file_write call.
- - If the document is very long, write it section by section using multiple file_write/file_edit calls — do NOT truncate.
- - Do not warn about length or apologize for length. Just write it completely.
+ - NEVER offer a "simplified", "condensed", or "brief" version — not even if the output gets cut off mid-write.
+ - NEVER say "the file is too large" or "let me create a more concise version". These phrases are forbidden.
+ - Strategy: write the document section by section. Create the file with section 1, then append sections 2, 3, … using file_edit or additional file_write calls. Each call writes one complete section.
+ - If an output limit interrupts a section mid-write, continue with the next file_write call for the remaining content. Do NOT restart or simplify.
+ - Do not warn about length or apologize for length. Just keep writing until done.
  - The conciseness rules above apply to conversational replies only, NOT to document content.`;
 }
 
