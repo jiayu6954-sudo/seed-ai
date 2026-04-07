@@ -192,8 +192,8 @@ export function useAgentLoop({
         triggerCompact: async () => {
           if (contextManagerRef.current) {
             onStateChange("compacting");
-            const anthropicKey = settings.apiKey ?? process.env["ANTHROPIC_API_KEY"] ?? "";
-            await contextManagerRef.current.compactWithSummary(anthropicKey);
+            const _provider = createProvider(settings);
+            await contextManagerRef.current.compactWithSummary(_provider, settings.model);
             onStateChange("idle");
           }
         },
@@ -530,14 +530,9 @@ export function useAgentLoop({
         // Requires Anthropic API key (uses Haiku for summarization).
         // Skip gracefully if no key — falls back to simple truncation via append().
         if (contextManagerRef.current.shouldCompact()) {
-          if (anthropicKey) {
-            onStateChange("compacting");
-            await contextManagerRef.current.compactWithSummary(anthropicKey);
-            onStateChange("idle");
-          } else {
-            // No Anthropic key (e.g. using DeepSeek/Groq): simple truncation, no summary
-            contextManagerRef.current.compact();
-          }
+          onStateChange("compacting");
+          await contextManagerRef.current.compactWithSummary(provider, settings.model);
+          onStateChange("idle");
         }
 
         // Innovation 7: extract and persist long-term memory.

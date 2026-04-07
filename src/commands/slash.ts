@@ -123,7 +123,7 @@ const COMMANDS: CommandDef[] = [
           `  Ctrl+C          — abort current task (or exit when idle)`,
           `  PgUp / PgDn     — scroll conversation`,
           `  ↑ / ↓           — cycle input history (when input is empty)`,
-          `  Shift+Enter     — insert newline without submitting`,
+          `  Ctrl+J          — insert newline without submitting`,
           `  Ctrl+U          — clear current input`,
           `──────────────────────────────────────`,
         ].join("\n"),

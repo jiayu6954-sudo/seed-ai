@@ -142,11 +142,16 @@ export async function runAgentLoop(
     }
 
     if (message.stop_reason === "max_tokens") {
-      options.onEvent({
-        type: "error",
-        error: new Error(`Max tokens (${options.maxTokens}) reached`),
+      // Auto-continue: inject a user message asking the model to carry on.
+      // The previous assistant content is already in history (line 136).
+      // This avoids the hard stop at 16k tokens that caused "amnesia" mid-task.
+      logger.info("loop.max_tokens_continue", { iteration: iterations, maxTokens: options.maxTokens });
+      options.onEvent({ type: "text_delta", delta: "\n[output truncated — continuing…]\n" });
+      messages.push({
+        role: "user",
+        content: "You were cut off due to the output length limit. Continue exactly from where you left off, without repeating anything.",
       });
-      return { finalMessage: message, updatedHistory: messages, totalUsage };
+      continue;
     }
 
     // ── 7. 处理 tool_use（Innovation 1：并行执行）────────────────────────

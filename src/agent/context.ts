@@ -1,7 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { ConversationMessage } from "../types/agent.js";
 import type { DevAISettings } from "../types/config.js";
+import type { AIProvider } from "../providers/interface.js";
 import { logger } from "../utils/logger.js";
+
+const SUMMARY_MAX_TOKENS = 600;
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-4-6": 200_000,
@@ -10,10 +12,6 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-4-5": 200_000,
   "claude-sonnet-4-5": 200_000,
 };
-
-// Innovation 3: use cheapest model for summarization
-const SUMMARY_MODEL = "claude-haiku-4-5-20251001";
-const SUMMARY_MAX_TOKENS = 600;
 
 export class ContextManager {
   private messages: ConversationMessage[] = [];
@@ -45,10 +43,10 @@ export class ContextManager {
     return `## 早期对话摘要（已压缩）\n\n${this.summaryHistory.join("\n\n---\n\n")}`;
   }
 
-  updateTokenCount(usage: Anthropic.Usage): void {
+  updateTokenCount(usage: { input_tokens?: number; cache_read_input_tokens?: number }): void {
     this.lastInputTokens =
       (usage.input_tokens ?? 0) +
-      ((usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0);
+      (usage.cache_read_input_tokens ?? 0);
   }
 
   shouldCompact(): boolean {
@@ -69,7 +67,13 @@ export class ContextManager {
    * 成本：每次压缩约 $0.0002（haiku 非常便宜）
    * 收益：防止模型因遗忘早期上下文而重复工作或犯错
    */
-  async compactWithSummary(apiKey: string): Promise<void> {
+  /**
+   * Innovation 3 (fixed): use the *current* provider for summarization.
+   * Previously used a hardcoded Anthropic Haiku call with `apiKey`, which
+   * always 403-ed for DeepSeek/Groq/OpenRouter users → no summary → AI amnesia.
+   * Now: pass the live AIProvider so DeepSeek uses DeepSeek, Anthropic uses Anthropic.
+   */
+  async compactWithSummary(provider: AIProvider, model: string): Promise<void> {
     if (this.messages.length <= 4) return;
 
     const keepCount = Math.max(4, Math.floor(this.settings.context.maxHistoryMessages / 2));
@@ -83,34 +87,34 @@ export class ContextManager {
       keepCount,
     });
 
-    // Generate summary using cheapest model
+    // Generate summary using the current provider (works for any provider)
     let summary = "";
     try {
-      const client = new Anthropic({ apiKey });
-      const response = await client.messages.create({
-        model: SUMMARY_MODEL,
-        max_tokens: SUMMARY_MAX_TOKENS,
-        system:
-          "你是一个对话摘要助手。你的任务是从AI编程助手的对话历史中提取关键信息。" +
-          "输出简洁的中文摘要，包含：已完成的操作、发现的问题、重要决策、当前状态。" +
-          "不超过400字。",
-        messages: [
-          ...toSummarize,
-          {
-            role: "user",
-            content:
-              "请总结以上对话中的关键内容，以便在后续对话中参考。重点：做了什么、发现了什么、当前状态。",
-          },
-        ],
+      const summaryMessages: ConversationMessage[] = [
+        ...toSummarize,
+        {
+          role: "user",
+          content:
+            "请总结以上对话中的关键内容，以便在后续对话中参考。重点：做了什么、发现了什么、当前状态。不超过400字。",
+        },
+      ];
+      const handle = provider.stream({
+        model,
+        maxTokens: SUMMARY_MAX_TOKENS,
+        systemPrompt:
+          "你是一个对话摘要助手。从AI编程助手的对话历史中提取关键信息。" +
+          "输出简洁摘要，包含：已完成的操作、发现的问题、重要决策、当前状态。不超过400字。",
+        messages: summaryMessages,
+        tools: [],
       });
-
-      if (response.content[0]?.type === "text") {
-        summary = response.content[0].text;
+      const msg = await handle.finalMessage();
+      const textBlock = msg.content.find((b) => b.type === "text");
+      if (textBlock?.type === "text") {
+        summary = textBlock.text;
         this.summaryHistory.push(summary);
         logger.info("context.compact.summary_generated", { length: summary.length });
       }
     } catch (err) {
-      // 摘要失败不影响主流程，降级为无摘要的简单截断
       logger.warn("context.compact.summary_failed", err);
       summary = `[摘要生成失败：${toSummarize.length} 条早期消息已删除]`;
       this.summaryHistory.push(summary);

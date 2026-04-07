@@ -246,7 +246,7 @@ export function App({ settings, cwd, initialPrompt, sessionId }: AppProps): Reac
                 ? "Ctrl+C interrupt"
                 : appState === "compacting"
                 ? "summarising context — please wait…"
-                : "Enter send    Shift+Enter newline    Ctrl+W del-word    Ctrl+C exit"}
+                : "Enter send    Ctrl+J newline    Ctrl+W del-word    Ctrl+C exit"}
             </Text>
           </Box>
 

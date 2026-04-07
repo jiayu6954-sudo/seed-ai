@@ -12,7 +12,7 @@ export const SettingsSchema = z.object({
     .string()
     .default("claude-sonnet-4-6"),
 
-  maxTokens: z.number().int().min(1024).max(128000).default(16000),
+  maxTokens: z.number().int().min(1024).max(128000).default(32000),
 
   tokenBudget: z
     .object({
