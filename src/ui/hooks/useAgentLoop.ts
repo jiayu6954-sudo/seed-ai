@@ -273,7 +273,6 @@ export function useAgentLoop({
       contextManagerRef.current.append({ role: "user", content: effectiveInput });
 
       const provider = createProvider(settings);
-      const anthropicKey = settings.apiKey ?? process.env["ANTHROPIC_API_KEY"] ?? "";
 
       // Innovation 8 (MCP lifecycle fix): connect once, reuse across all submits.
       if (!mcpConnectedRef.current) {
@@ -535,14 +534,14 @@ export function useAgentLoop({
           onStateChange("idle");
         }
 
-        // Innovation 7: extract and persist long-term memory.
-        // Only runs if memory is enabled AND Anthropic key is available.
-        // Without the key, the Haiku call would 403 — skip silently to avoid log spam.
-        if (settings.memory.enabled && anthropicKey) {
+        // Innovation 7: extract and persist long-term memory using current provider.
+        // Works with any provider (DeepSeek, Anthropic, etc.) — no longer requires Anthropic key.
+        if (settings.memory.enabled) {
           extractAndSaveMemory(
             cwd,
             contextManagerRef.current.getHistory(),
-            anthropicKey,
+            provider,
+            settings.model,
             true
           ).catch((err) => logger.warn("memory.extract.background_error", err));
         }

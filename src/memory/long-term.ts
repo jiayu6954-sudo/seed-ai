@@ -20,15 +20,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../utils/logger.js";
 import { MEMORY_DIR } from "../config/settings.js";
 import type { ConversationMessage } from "../types/agent.js";
+import type { AIProvider } from "../providers/interface.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MEMORY_ROOT = MEMORY_DIR;
-const EXTRACTION_MODEL = "claude-haiku-4-5-20251001";
 const EXTRACTION_MAX_TOKENS = 1200;
 // Minimum conversation length before attempting extraction (avoid trivial sessions)
 const MIN_MESSAGES_FOR_EXTRACTION = 4;
@@ -207,10 +206,9 @@ interface ExtractionResult {
 async function extractFromConversation(
   conversation: string,
   existingMemory: LongTermMemory,
-  anthropicKey: string
+  provider: AIProvider,
+  model: string,
 ): Promise<ExtractionResult | null> {
-  const client = new Anthropic({ apiKey: anthropicKey });
-
   const existingSummary = [
     existingMemory.user && `Existing user memory:\n${existingMemory.user}`,
     existingMemory.projectContext && `Existing project context:\n${existingMemory.projectContext}`,
@@ -223,20 +221,17 @@ async function extractFromConversation(
   const userPrompt = `${existingSummary ? `## Existing memory (do not repeat, only add new)\n${existingSummary}\n\n` : ""}## Conversation to analyse\n${conversation}\n\n## Output schema\n${EXTRACTION_SCHEMA}\n\nExtract new knowledge. Return JSON only.`;
 
   try {
-    const response = await client.messages.create({
-      model: EXTRACTION_MODEL,
-      max_tokens: EXTRACTION_MAX_TOKENS,
-      system: EXTRACTION_SYSTEM,
+    const handle = provider.stream({
+      model,
+      maxTokens: EXTRACTION_MAX_TOKENS,
+      systemPrompt: EXTRACTION_SYSTEM,
       messages: [{ role: "user", content: userPrompt }],
+      tools: [],
     });
-
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { type: "text"; text: string }).text)
-      .join("");
-
-    // Strip markdown fences if present
-    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const msg = await handle.finalMessage();
+    const textBlock = msg.content.find((b) => b.type === "text");
+    if (!textBlock || textBlock.type !== "text") return null;
+    const cleaned = textBlock.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     return JSON.parse(cleaned) as ExtractionResult;
   } catch (err) {
     logger.warn("memory.extract.failed", err);
@@ -282,17 +277,12 @@ async function writeIfNonEmpty(filePath: string, content: string): Promise<void>
 export async function extractAndSaveMemory(
   projectPath: string,
   messages: ConversationMessage[],
-  anthropicKey: string,
+  provider: AIProvider,
+  model: string,
   enabled = true
 ): Promise<boolean> {
   if (!enabled) {
     logger.debug("memory.extract.disabled");
-    return false;
-  }
-  if (!anthropicKey || !anthropicKey.startsWith("sk-ant-")) {
-    // Memory extraction requires an Anthropic key (uses Haiku).
-    // Skip silently when the user is using a non-Anthropic provider.
-    logger.debug("memory.extract.skip_no_anthropic_key");
     return false;
   }
   if (messages.length < MIN_MESSAGES_FOR_EXTRACTION) {
@@ -306,7 +296,7 @@ export async function extractAndSaveMemory(
 
   logger.debug("memory.extract.start", { chars: conversation.length });
 
-  const extracted = await extractFromConversation(conversation, existing, anthropicKey);
+  const extracted = await extractFromConversation(conversation, existing, provider, model);
   if (!extracted) return false;
 
   const merged: LongTermMemory = {
