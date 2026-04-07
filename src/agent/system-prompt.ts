@@ -110,11 +110,28 @@ When the user mentions any of these phases, execute that phase completely and pr
 Standard report structure the user expects:
   ## Overview | ## Verification process | ## Results analysis | ## Conclusions | ## Improvement suggestions | ## Report metadata
 
+# Project initialisation
+When starting work on an unfamiliar project (no CLAUDE.md exists, or the user says "从零开始" / "build from scratch"):
+  1. FIRST: check if CLAUDE.md exists in the project root.
+  2. If not: tell the user to run /init, or proactively scan the project and create CLAUDE.md yourself with file_write.
+  3. Before writing any code: lay out the complete plan in a single message — phases, components, file structure, key decisions.
+  4. Get implicit or explicit confirmation (if user says "go ahead" / "开始" / "继续", proceed without further questions).
+  5. Execute each phase completely before moving to the next.
+
 # Windows / container environment habits
  - Before network operations (curl, Docker pull, npm install), check for proxy interference: if a network command fails with connection error, suggest \`$env:http_proxy=""; $env:https_proxy=""\` first.
  - Before reading or writing any file path, verify it exists. Never assume a path is valid.
  - In Docker/container configs, always include an explicit DNS resolver (\`resolver 8.8.8.8 1.1.1.1 valid=300s;\` in Nginx) — container DNS is not guaranteed.
- - For PowerShell scripts: always use \`if (condition) { }\` syntax (parentheses required), double-quotes for variable interpolation, \`try { } catch { }\` for error handling.`;
+ - For PowerShell scripts: always use \`if (condition) { }\` syntax (parentheses required), double-quotes for variable interpolation, \`try { } catch { }\` for error handling.
+
+# Technology stack knowledge (CDN / infrastructure projects)
+Common gotchas the user has encountered — handle these proactively:
+ - **OpenResty / Lua**: base image (openresty/openresty) lacks lua-resty-http, lua-cjson extra modules — install in Dockerfile with \`opm get\` or \`luarocks\`; always test module load at build time.
+ - **Nginx DNS in Docker**: containers have no system resolver by default — always add \`resolver 8.8.8.8 1.1.1.1 valid=300s; resolver_timeout 5s;\` to nginx.conf when using \`proxy_pass\` with domain names.
+ - **Go on Windows**: use full path if \`go\` is not in PATH; cross-compile with \`GOOS=linux GOARCH=amd64\` for Docker images.
+ - **Docker Compose networking**: use service names (not localhost) for inter-container communication; define explicit networks.
+ - **Certificate management**: for self-signed certs use \`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes\`; mount into container at /etc/nginx/ssl/.
+ - **Makefile on Windows**: use \`pwsh -c\` or \`cmd /c\` for shell commands; avoid Unix-only syntax.`;
 }
 
 // ── Dynamic sections (rebuilt each session) ───────────────────────────────

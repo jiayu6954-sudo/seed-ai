@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { TokenUsage } from "../types/agent.js";
+import { writeClaudeMd } from "../memory/claude-md.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -202,6 +203,86 @@ const COMMANDS: CommandDef[] = [
         };
       } catch (e) {
         return { type: "message", text: `── Diagnostics ────────────────────────\n  Failed to read log: ${String(e)}\n──────────────────────────────────────` };
+      }
+    },
+  },
+  {
+    name: "init",
+    description: "Scan current project and create CLAUDE.md with project context for persistent memory",
+    handler: (_args, ctx) => {
+      // Scan project structure and write a CLAUDE.md scaffold.
+      // The LLM will then be asked (via the returned message) to fill in the content properly.
+      const cwd = ctx.cwd;
+      const files: string[] = [];
+      try {
+        // Collect top-level items and key config files
+        const entries = fs.readdirSync(cwd, { withFileTypes: true });
+        for (const e of entries.slice(0, 40)) {
+          files.push(e.isDirectory() ? `${e.name}/` : e.name);
+        }
+      } catch { /* ignore */ }
+
+      const scaffold = [
+        `# Project Context (CLAUDE.md)`,
+        `<!-- Auto-scaffolded by /init — fill in details or ask Seed AI to complete this -->`,
+        ``,
+        `## Project`,
+        `<!-- What is this project? What does it do? -->`,
+        ``,
+        `## Tech Stack`,
+        `<!-- Languages, frameworks, databases, key libraries -->`,
+        ``,
+        `## Architecture`,
+        `<!-- High-level structure, key components, how they interact -->`,
+        ``,
+        `## Key Decisions`,
+        `<!-- Why was X chosen over Y? Important constraints. -->`,
+        ``,
+        `## Common Commands`,
+        `\`\`\`bash`,
+        `# build / test / start / deploy`,
+        `\`\`\``,
+        ``,
+        `## Known Issues / Gotchas`,
+        `<!-- Proxy settings, DNS config, dependency quirks, environment requirements -->`,
+        ``,
+        `## Delivery Standards`,
+        `<!-- Quality expectations, checklist, acceptance criteria -->`,
+      ].join("\n");
+
+      try {
+        // Only create if CLAUDE.md doesn't already exist
+        const claudeMdPath = path.join(cwd, "CLAUDE.md");
+        if (fs.existsSync(claudeMdPath)) {
+          return {
+            type: "message",
+            text: [
+              `── /init ───────────────────────────────`,
+              `  CLAUDE.md already exists at:`,
+              `  ${claudeMdPath}`,
+              `  Use file_edit to update it, or delete it first to reinitialise.`,
+              `──────────────────────────────────────`,
+            ].join("\n"),
+          };
+        }
+        void writeClaudeMd(cwd, scaffold);
+        return {
+          type: "message",
+          text: [
+            `── /init ───────────────────────────────`,
+            `  Created CLAUDE.md at: ${claudeMdPath}`,
+            ``,
+            `  Project files detected (${files.length}):`,
+            `  ${files.slice(0, 20).join("  ")}`,
+            ``,
+            `  Next: ask Seed AI "填写这个项目的 CLAUDE.md" and it will`,
+            `  analyse the codebase and fill in all sections automatically.`,
+            `  This file persists across sessions — AI will remember context.`,
+            `──────────────────────────────────────`,
+          ].join("\n"),
+        };
+      } catch (e) {
+        return { type: "message", text: `── /init ────────────────────────────\n  Failed: ${String(e)}\n──────────────────────────────────` };
       }
     },
   },
