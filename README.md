@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
-**A TypeScript CLI AI coding assistant built from scratch — 27 shipped features, clean architecture, honest about its limitations.**
+**A TypeScript CLI AI coding assistant — 27 design improvements inspired by Claude Code's architecture, production-ready design, actively seeking production validation.**
 
-> Not a wrapper. Not a clone. A ground-up reimplementation that studied Claude Code's architecture, then extended it in directions Claude Code does not address: multi-provider support, cross-session memory, local LLMs, Docker sandboxing, and a DeerFlow-inspired sub-agent research loop.
+> Not a wrapper. Not a clone. A ground-up reimplementation that studied Claude Code and DeerFlow-2.0, then extended their architecture in directions both tools do not address: multi-provider support, cross-session memory, local LLMs, Docker sandboxing, and a sub-agent research loop.
 
 > **⚠️ Maturity warning:** Seed AI is an early-stage project maintained by one person. Core features work and are manually tested. **End-to-end integration tests for the Agent Loop do not exist.** Edge-case behavior (streaming interruption, hook failure during long context, network errors mid-tool-call) is largely unverified. Do not depend on this for production workflows without your own validation. Contributions to the test suite are the highest-value thing you can do — see [Quality & Testing](#quality--testing).
 
@@ -356,7 +356,7 @@ Memory Layer
 
 > **Context for this comparison:** Claude Code is Anthropic's reference CLI client, optimized for deep integration with Claude models. It does not aim to be a multi-provider or local-LLM platform. The dimensions where Seed AI "leads" are largely dimensions Claude Code chose not to address — not areas where Claude Code tried and failed. If you use Claude exclusively and want the best model integration, Claude Code is the right tool. The comparison below is useful for understanding the scope of each project, not for declaring a winner.
 
-### Where Seed AI adds capability Claude Code does not have
+### Where Seed AI adds capability Claude Code does not address
 
 | Dimension | Seed AI | Claude Code |
 |-----------|-------|-------------|

@@ -1,5 +1,7 @@
 # Seed AI — 全链路系统技术白皮书
-**版本：v0.9.1-r6　　评估日期：2026-04-04　　文档类型：内部技术白皮书**
+**版本：v0.9.1-alpha.24　　评估日期：2026-04-08　　文档类型：内部技术白皮书**
+
+> **覆盖范围：** I001–I027（27 项已交付创新）。本白皮书是对工程实现的诚实记录；已知局限（集成测试缺失、单人维护）与优势同等详尽呈现。
 
 ---
 
@@ -8,13 +10,13 @@
 1. [项目概述与定位](#1-项目概述与定位)
 2. [整体系统架构](#2-整体系统架构)
 3. [核心引擎：Agent Loop 全链路](#3-核心引擎agent-loop-全链路)
-4. [十四项创新技术详解（已交付）](#4-十四项创新技术详解已交付)
+4. [二十七项创新技术详解（已交付）](#4-二十七项创新技术详解已交付)
 5. [UI 工程：终端渲染系统](#5-ui-工程终端渲染系统)
 6. [工具层全链路](#6-工具层全链路)
 7. [稳定性工程](#7-稳定性工程)
 8. [与 Claude Code 基准对比](#8-与-claude-code-基准对比)
 9. [代码质量评估](#9-代码质量评估)
-10. [下一阶段路线图（I014+）](#10-下一阶段路线图i014)
+10. [下一阶段路线图（I028+）](#10-下一阶段路线图i028)
 11. [综合结论](#11-综合结论)
 
 ---
@@ -23,7 +25,9 @@
 
 ### 1.1 项目定义
 
-**Seed AI** 是一个从零构建的、生产级 TypeScript CLI AI 编程助手。其核心目标不是复制 Claude Code，而是在系统分析 Claude Code 的技术架构和设计模式后，识别可改进点并实现超越基准的自主创新。
+**Seed AI** 是一个从零构建的 TypeScript CLI AI 编程助手（早期阶段）。其核心目标不是复制 Claude Code，而是在系统分析 Claude Code 的技术架构和设计模式后，识别可改进点并实现超越基准的自主创新。
+
+**诚实状态说明：** 27 项设计改进（受 Claude Code 架构启发）均已交付。架构设计达到生产就绪标准，正在积极寻求生产验证。主要局限是 **Agent Loop 端到端集成测试为零**——这是项目当前从"认真的原型"迈向"认真的软件"最关键的分水岭。项目由单人维护，欢迎社区贡献集成测试。
 
 ### 1.2 技术选型
 
@@ -41,9 +45,11 @@
 ### 1.3 源码结构
 
 ```
-d:/claude/seed/src/
-├── agent/          # Loop、Stream、ContextManager、SystemPrompt
-├── tools/          # 7 个原生工具 + Cache + Registry
+src/
+├── agent/          # Loop、Stream、ContextManager、SystemPrompt、research-loop(I024)
+├── tools/          # 10 个原生工具 + Cache + Registry（含 HooksRunner I027）
+├── hooks/          # PreToolUse/PostToolUse 钩子引擎（I027）
+├── skills/         # Skills 框架 loader（I023）
 ├── ui/             # Ink 组件、主题、Hooks
 ├── providers/      # AIProvider 抽象 + 8 种实现 + Local 智能层
 ├── permissions/    # 工具权限管理
@@ -51,7 +57,7 @@ d:/claude/seed/src/
 ├── sandbox/        # Docker 沙箱管理
 ├── memory/         # 长期记忆 + 语义向量检索（I012）
 ├── config/         # Zod schema + 配置加载
-├── commands/       # 斜杠命令系统
+├── commands/       # 斜杠命令系统（/clear /plan /skill 等 11 个）
 ├── cli/commands/   # CLI 子命令（config model / sessions）
 └── utils/          # logger、stats、cost-calculator、token-budget-parser
 ```
@@ -78,7 +84,10 @@ d:/claude/seed/src/
 │  ┌─────────────────────────────────────┐                    │
 │  │  useAgentLoop (React Hook)          │                    │
 │  │  ├─ Token Budget Parser (I010)      │                    │
-│  │  ├─ Permission flow                 │                    │
+│  │  ├─ Skills Loader (I023)            │                    │
+│  │  ├─ ResearchRunner closure (I024)   │                    │
+│  │  ├─ HooksConfig wiring (I027)       │                    │
+│  │  ├─ checkpoint event handler (I026) │                    │
 │  │  └─ Event → UIContentBlock mapping  │                    │
 │  └─────────────────────────────────────┘                    │
 └──────────────────────────┬──────────────────────────────────┘
@@ -87,8 +96,10 @@ d:/claude/seed/src/
 │                    Agent Layer                               │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  runAgentLoop (loop.ts)                             │    │
-│  │  ├─ MAX_ITERATIONS = 50                             │    │
+│  │  ├─ DEFAULT_MAX_ITERATIONS = 200                    │    │
+│  │  ├─ maxIterations option (sub-loop: 6/15)           │    │
 │  │  ├─ Token Budget Guard (I008)                       │    │
+│  │  ├─ CHECKPOINT_RE detector (I026)                   │    │
 │  │  ├─ StreamHandler → NormalizedBlock 事件            │    │
 │  │  ├─ 并行工具执行 (I001)                              │    │
 │  │  └─ onEvent callbacks → UI                         │    │
@@ -115,6 +126,18 @@ d:/claude/seed/src/
 │ OpenRouter  │    ├─ ToolCapDetect
 │ Moonshot    │    └─ XmlFallbackSSE
 └─────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│  Tool Layer (10 tools)                                   │
+│  ├─ bash / file_read / file_write / file_edit            │
+│  ├─ glob / grep / web_fetch                              │
+│  ├─ web_search (I022, multi-provider)                    │
+│  ├─ git_commit (I025)                                    │
+│  ├─ spawn_research (I024) → research sub-loop            │
+│  │       └─ runAgentLoop [web_search+web_fetch only]     │
+│  ├─ HooksRunner (I027) PreToolUse/PostToolUse            │
+│  └─ ToolCache (I002) + ToolRegistry                      │
+└──────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────┐
 │  Memory Layer                                            │
 │  ┌────────────────┐   ┌─────────────────────────────┐   │
@@ -136,7 +159,7 @@ d:/claude/seed/src/
     ├─ stripTokenBudgetPhrase() → effectiveInput
     └─ runAgentLoop(provider, options, tools, permissions)
            │
-           ▼ while (iterations < 50)
+           ▼ while (iterations < 200)   // sub-loop: 6 or 15
            ├─ [I008] token budget 硬限制检查
            ├─ provider.stream() → AsyncIterable<NormalizedBlock>
            │      └─ StreamHandler 实时解析 → onEvent("text_delta")
@@ -223,7 +246,9 @@ const dynamicParts = [
 
 ---
 
-## 4. 十四项创新技术详解（已交付）
+## 4. 二十七项创新技术详解（已交付）
+
+> I001–I020 详见下方各小节。I021–I027 为 DeerFlow-2.0 学习后融合的新一批创新，记录在 §4.7。
 
 ### I001 — 并行工具执行
 
@@ -712,6 +737,66 @@ import("./storage/guard.js").then(({ runStorageGuard }) => {
 
 ---
 
+### §4.7 DeerFlow 融合层（I021–I027，alpha.23–alpha.24）
+
+深度研究 ByteDance DeerFlow-2.0 框架后，将其核心架构创新移植到 CLI 编程助手场景。
+
+#### I021 — Plan Mode（/plan 结构化规划）
+
+`/plan <task>` 将用户输入重写为结构化规划提示（PLAN MODE 前缀），注入目标拆解、阶段划分、决策点和验证步骤，强制 AI 在用户确认前禁止调用工具。
+- 新增 `SlashResult` type: `{ type: "rewrite"; input: string }` — 替换 effectiveInput 后送入 LLM
+- 文件：`src/commands/slash.ts`
+
+#### I022 — web_search 多提供商搜索
+
+四个提供商自动降级：**Tavily → Brave → Serper → DuckDuckGo**（免费兜底，无 API Key 可用）。
+- 3 分钟结果缓存；默认权限 `auto`
+- DuckDuckGo：抓取 `lite.duckduckgo.com/lite/`，native fetch + curl.exe fallback
+- 文件：`src/tools/web-search.ts`
+
+#### I023 — Skills 框架
+
+`~/.seed/skills/*.md` YAML frontmatter 定义触发词，用户消息匹配时自动注入对应协议到系统提示。
+- `initDefaultSkills()` 首次运行生成 3 个示例 skill（白皮书/调试/功能实现）
+- `/skill` 命令列出已加载 Skills 及触发词
+- 文件：`src/skills/loader.ts`
+
+#### I024 — spawn_research 孤立研究子智能体
+
+`spawn_research` 工具触发独立 Agent 循环，仅开放 `web_search` + `web_fetch` 两个工具，不污染主对话上下文。
+- `ResearchRunner` 工厂函数注入 ToolRegistry——避免循环导入
+- `depth="basic"` → maxIterations=6；`depth="deep"` → maxIterations=15
+- 子循环结束标记：`[[RESEARCH_COMPLETE]]`
+- 文件：`src/agent/research-loop.ts`
+
+#### I025 — git_commit 交付闭环工具
+
+`git_commit` 工具完成 代码→测试→**提交** 的工程交付闭环。
+- `git add -u`（或指定文件）→ `git commit -m` → `git show --stat --oneline HEAD`
+- 默认权限：`ask`（提交前需用户确认）
+- Conventional commit 格式：`type(scope): description`
+- 文件：`src/tools/git-commit.ts`
+
+#### I026 — CHECKPOINT 人在回路检查点
+
+AI 可在响应末尾输出 `[[CHECKPOINT: reason]]` 触发暂停。
+- `CHECKPOINT_RE = /\[\[CHECKPOINT(?::\s*(.*?))?\]\]/s`，在 `end_turn` 分支检测
+- 标记从可见文本中剥离，emit `{ type: "checkpoint", message }` 事件
+- UI 显示 ⏸ 系统消息，返回 idle 等待用户确认后继续
+- 文件：`src/agent/loop.ts`, `src/types/agent.ts`
+
+#### I027 — Hooks PreToolUse/PostToolUse
+
+用户可定义 shell 钩子在每次工具执行前后自动运行。
+- 模板变量：`${toolName}` `${path}` `${command}` `${query}` `${url}` `${cwd}`
+- `failBehavior="warn"`：失败仅记录；`failBehavior="block"`：阻止工具执行
+- Pre-hook blocked → 立即返回错误，工具不执行
+- Post-hook 输出追加到工具结果，AI 可据此反应（如修复 lint 错误）
+- 配置：`~/.seed/settings.json` → `hooks.preToolUse[]` / `hooks.postToolUse[]`
+- 文件：`src/hooks/runner.ts`
+
+---
+
 ## 5. UI 工程：终端渲染系统
 
 ### 5.1 设计系统 (`ui/theme.ts`)
@@ -900,7 +985,7 @@ LLM 输出 tool_use block
     └─ cache.set() → 只读工具存入缓存
 ```
 
-### 6.2 七个原生工具规格
+### 6.2 十个原生工具规格
 
 | 工具 | 输出上限 | 缓存 | Sandbox | 关键特性 |
 |------|---------|------|---------|---------|
@@ -911,6 +996,9 @@ LLM 输出 tool_use block
 | `glob` | 50K | ✅ 会话级 | ❌ | 修改时间排序（最新在前）|
 | `grep` | 50K | ✅ 会话级 | ❌ | 正则，include 过滤，行号 |
 | `web_fetch` | 80KB (可配置) | ✅ 5分钟TTL | ❌ | 双路策略（见下）|
+| `web_search` | 50K | ✅ 3分钟TTL | ❌ | Tavily/Brave/Serper/DDG 自动降级（I022）|
+| `git_commit` | — | ❌ | ❌ | git add -u → commit → show --stat（I025）|
+| `spawn_research` | 50K | ❌ | ❌ | 孤立子循环，depth=basic/deep（I024）|
 
 ### 6.3 web_fetch 双路策略详解 (v0.8.0)
 
@@ -1020,7 +1108,9 @@ try {
 
 ## 8. 与 Claude Code 基准对比
 
-### 8.1 devai 超越 Claude Code 的维度
+> **比较语境：** Claude Code 是 Anthropic 的参考 CLI 客户端，设计目标是深度 Claude 模型集成，而非多模型平台。Seed AI "超越"的维度大多是 CC **选择不涉足**的方向，不是 CC 尝试失败的地方。若工作流 100% 依赖 Claude 模型，CC 是更好的选择；若需要 Provider 灵活性、本地 LLM 或跨会话记忆，Seed AI 是补充。
+
+### 8.1 Seed AI 新增的能力（CC 未涉足）
 
 | 维度 | devai 实现 | Claude Code 现状 |
 |------|-----------|-----------------|
@@ -1035,18 +1125,24 @@ try {
 | **本地模型支持** | 无本地 LLM 集成，仅 Anthropic API | I011 已完成：Ollama 自动发现 + XML 工具降级 |
 | **语义记忆** | 全量历史注入 | I012 已完成：向量检索，tokens 恒定 |
 | **模型切换** | `/model` 命令（交互式）| I013 已完成：`seed config model` + 快速 flags |
+| **网络搜索** | 有限 | I022：Tavily/Brave/Serper/DDG 四提供商自动降级 |
+| **研究子智能体** | 无 | I024：孤立子循环，depth=basic/deep |
+| **Hooks 系统** | `PreToolUse`/`PostSampling` | I027：PreToolUse/PostToolUse，block/warn 行为，模板变量 |
+| **Plan Mode** | 只读规划模式 | I021 `/plan`：结构化规划提示注入 |
+| **Skills 框架** | 无 | I023：`~/.seed/skills/*.md` 可复用任务协议 |
+| **CHECKPOINT 检查点** | 无 | I026：`[[CHECKPOINT:reason]]` 多阶段任务安全门 |
+| **git_commit 工具** | 无 | I025：conventional commits，交付闭环 |
 | **开源透明性** | 未开源（专有软件）| Seed AI 完全开源（MIT License），社区可审计、fork、贡献 |
 
 ### 8.2 Claude Code 仍领先的维度
 
-| 维度 | Claude Code 优势 | devai 现状与路线图 |
+| 维度 | Claude Code 优势 | Seed AI 现状 |
 |------|-----------------|-------------|
-| **Hooks 系统** | `PreToolUse` / `PostSampling` 可编程钩子，用户可注入 shell 脚本 | I015 — 下一优先级（含沙箱安全约束）|
-| **会话持久化** | Transcript JSON 存储 + `/resume [id]` 恢复 | 路线图中 |
-| **Plan Mode** | 只读规划模式，LLM 描述意图但不执行工具 | 路线图中 |
-| **VSCode 集成** | IDE Extension + 双向通信 + 代码内联 | 产品定位差异：Seed AI 为 CLI-first，不追求 IDE 集成 |
-| **权限系统精细度** | 工具级 + 路径级规则，会话内学习用户偏好 | 已支持 per-tool auto/ask/deny；路径级规则（glob 白名单）尚未支持，计划中 |
-| **成熟度** | 大规模用户验证，edge case 处理完备 | 积累中；集成测试是当前主要质量差距 |
+| **Claude 模型集成深度** | 针对 Claude 模型深度优化，Prompt 效果最优 | 适配层增加一定抽象，多模型通用性 vs 单模型最优有权衡 |
+| **会话持久化** | Transcript JSON 存储 + `/resume [id]` 恢复 | I028 路线图中 |
+| **VSCode 集成** | IDE Extension + 双向通信 + 代码内联 | CLI-first 定位，不追求 IDE 集成 |
+| **权限系统精细度** | 工具级 + 路径级规则，会话内学习用户偏好 | 已支持 per-tool auto/ask/deny；路径级规则计划中 |
+| **成熟度与测试覆盖** | 大规模用户验证，edge case 处理完备 | 早期阶段；**Agent Loop 端到端集成测试为零**是当前主要差距 |
 
 ---
 
@@ -1084,59 +1180,47 @@ try {
 | 可维护性 | 4/5 | 模块边界清晰，创新编号注释，函数职责单一 |
 | 安全性 | 4/5 | Docker 隔离 + 截断 + 无伪造，缺 path traversal 校验 |
 | 性能 | 4.5/5 | 并行执行 + 缓存 + 截断；I003 上下文压缩在长对话中偶发触发（等待 Haiku API ~1–2s），UI Spinner 掩盖冻结感；I012 向量检索将记忆注入量固定在 ~800 tokens（与 I003 触发条件独立）|
-| 测试覆盖 | 3/5 | 关键模块有单测，集成测试不足 |
+| 测试覆盖 | **2/5** | **Agent Loop 端到端零测试**；Hooks/CHECKPOINT/研究子循环仅手动验证；14 个单元测试覆盖记忆/权限/成本等辅助模块 |
+| 架构设计 | 4.5/5 | ResearchRunner 注入避免循环依赖，HooksRunner 透明包裹所有工具，CHECKPOINT 无状态机依赖 |
 
-**综合评分：4.2 / 5.0 — 生产可用，专业级代码质量**
-
----
-
-## 10. 下一阶段路线图（I015+）
-
-> **v0.9.1 状态：** I016 Storage Guard 已完成并在 Section 4 详述。下列为待交付项。
-
-### ~~I014~~ — 进程外 LLM 压缩（已评估，不实施）
-
-**原始动机：** I003 压缩在主进程同步等待 Haiku API，期间 UI 冻结约 1–2 秒。
-
-**放弃原因：**  
-I012 语义向量检索的引入使 system prompt 中的记忆注入量固定在 ~800 tokens，大幅降低了 I003 触发频率。剩余的偶发冻结是可接受的 UX 代价，**正确解法是 UI 层 Spinner 掩盖，而非向底层架构借高利贷**。
-
-引入 `worker_threads` + `MessageChannel` + 跨线程状态机，会彻底打破当前干净的单线程 ESM 架构，带来的维护复杂度远超边际 UX 收益。I014 永久搁置。
-
-**替代方案（已实施）：** I003 触发时在 StatusBar 显示 `"compressing..."` Spinner，无需任何架构变更。
+**综合评分：4.1 / 5.0**  
+架构和代码质量处于早期项目的较高水平；测试覆盖是当前最显著的工程质量短板。
 
 ---
 
-### I015 — Hooks 系统
+## 10. 下一阶段路线图（I028+）
 
-**目标：** 允许用户定义 shell 脚本在工具执行前后自动运行，实现 CI 集成、自定义审计、环境注入等扩展点。
+> **alpha.24 状态：** I001–I027 全部已交付。~~I014~~ 经架构评估永久搁置（I012 已消解其问题根源）。下列为下一批待交付项。
 
-**设计方案：**
-```typescript
-// settings.json 配置示例
-{
-  "hooks": [
-    { "event": "PreToolUse",  "tool": "bash",      "command": "echo 'About to run: $DEVAI_TOOL_INPUT'" },
-    { "event": "PostToolUse", "tool": "file_edit",  "command": "npm run lint -- $DEVAI_TOOL_PATH" }
-  ]
-}
-```
+### I028 — 会话 Transcript 导出/恢复
 
-**预期新增文件：**
-- `src/hooks/runner.ts` — hook 执行引擎，`execFile` 异步执行，超时 10s
-- `src/hooks/types.ts` — `HookDefinition` / `HookEvent` 接口
-
-**集成点：** `ToolRegistry.execute()` 前后各插入 hook 执行
-
-**安全约束（强制）：** Hook 脚本必须在 I005 Docker 沙箱内执行（当 `sandbox.enabled=true` 时），不得在宿主进程直接 `exec`。原因：恶意 Prompt Injection 可能诱使 LLM 触发 `file_edit` 工具，进而激活 `PostToolUse` hook 执行任意宿主命令（如修改 `package.json` 的 `preinstall` 脚本，在下次 `npm install` 时获得代码执行权）。沙箱隔离是阻断此攻击链的唯一可靠手段。
+**目标：** 将完整对话 transcript 持久化为 JSON，支持 `/resume [id]` 恢复先前会话。  
+**预期文件：** `src/memory/transcript.ts`，CLI 子命令 `seed sessions`
 
 ---
 
-### Plan Mode（路线图）
+### I029 — file_edit 流式 Diff 渲染
 
-**目标：** `/plan` 命令切换只读规划模式 — LLM 描述完整执行计划、影响评估，但不调用任何工具；用户确认后执行。
+**目标：** `file_edit` 执行时实时渲染内联 before/after diff，而非当前的静态 "✓ file_edit" 标记。  
+**集成点：** `useAgentLoop.ts` tool_result 事件处理，diff 着色与现有 real-time diff 渲染复用
 
-**集成：** `runAgentLoop` 接收 `planMode: boolean`，为 true 时屏蔽工具执行权限
+---
+
+### I030 — Auto-PR（git_commit → gh pr create）
+
+**目标：** `git_commit` 完成后，AI 可选择性地继续调用 `gh pr create` 生成 PR 草稿，完整工程交付闭环。  
+**约束：** 需要用户已安装 `gh` CLI 并完成 GitHub 认证
+
+---
+
+### 工程债务（优先于新 Innovation）
+
+| 项目 | 说明 | 优先级 |
+|------|------|--------|
+| Agent Loop 集成测试 | 端到端测试 happy path + streaming 中断 + hook 错误 | **最高** |
+| MCP 端到端验证 | 接入真实 MCP server（Notion/Postgres）| 高 |
+| 路径遍历安全校验 | `file_read`/`file_write` 添加路径边界检查 | 高 |
+| WHITEPAPER 后续同步 | I028+ 完成后继续更新本白皮书 | 中 |
 
 ---
 
@@ -1144,7 +1228,7 @@ I012 语义向量检索的引入使 system prompt 中的记忆注入量固定在
 
 ### 11.1 里程碑达成
 
-Seed AI v0.9.1 完整交付了 14 项规划创新（I001–I013 共 13 项 + I016，I014 经架构评估后永久搁置，I015 列入下一阶段路线图），并通过多项关键 Bug 修复（LazyStreamHandle 双重请求、probeToolSupport 误判、XmlFallbackStreamHandle 阻塞、Ollama R1 think 标签泄漏）完成了本地模型全链路稳定性工程。v0.9.1 新增 Storage Guard 自动配额保护和 SEED_DATA_DIR 路径统一，解决了长期使用场景下系统盘空间耗尽的隐患。系统现已支持零 API Key 本地运行（Ollama），对用户实现了无缝 provider 切换体验。
+Seed AI alpha.24 完整交付 27 项创新（I001–I027，I014 经架构评估永久搁置），并通过系统测试 8 项全通过（TypeScript 零错误、Vitest 14/14、工具路由验证、Hooks block/warn 行为验证）。DeerFlow-2.0 学习成果已完整融合：研究子智能体（I024）、git 交付闭环（I025）、人在回路检查点（I026）、Hooks 系统（I027）全部落地。
 
 ### 11.2 核心竞争力
 
@@ -1154,19 +1238,20 @@ Seed AI v0.9.1 完整交付了 14 项规划创新（I001–I013 共 13 项 + I01
 | **本地 LLM 一键接入** | I011 自动发现 + 工具能力降级，Ollama/LM Studio/vLLM 开箱即用 |
 | **无限语义记忆** | I012 向量检索，context 恒定 ~800 tokens，记忆量无上限 |
 | **渐进式记忆进化** | I007 三层记忆 + I012 语义提取，越用越聪明 |
-| **弹性网络能力** | web_fetch 双路降级，覆盖国内外主流网站 |
+| **研究子智能体** | I024 孤立循环，deep=15 轮，上下文完全隔离 |
+| **可编程工具管道** | I027 Hooks 系统，block/warn + 模板变量，实现 CI 集成 |
+| **弹性网络能力** | web_fetch 双路降级 + web_search 四提供商，覆盖国内外主流网站 |
 | **安全边界** | Docker 沙箱 + 无伪造规则 + 输出截断 |
-| **终端体验** | CC 同源色彩系统 + Diff 渲染 + 品牌标识保留 |
-| **用户友好切换** | I013 交互式 provider 切换，支持一行命令无交互配置 |
-| **存储安全** | I016 Storage Guard 自动配额 + SEED_DATA_DIR 跨盘迁移，长期运行无膨胀风险 |
+| **工程交付闭环** | I025 git_commit + I026 CHECKPOINT，完整 代码→测试→提交→确认 链路 |
 
-### 11.3 差距与计划
+### 11.3 诚实的局限
 
-当前与 Claude Code 的主要差距集中在**可扩展性**（I015 Hooks 系统）和**交互安全**（Plan Mode）。存储安全问题已由 I016 在 v0.9.1 解决。I014（进程外压缩）经架构评估后永久搁置——I012 的引入已将该问题消解于无形，强行实施的工程代价不可接受。
+1. **集成测试为零：** Agent Loop 端到端、Hooks 边缘情况、流式中断恢复均无自动化测试
+2. **单人维护：** 任何上游破坏性变更（Provider API / Ollama 协议）均需作者立即响应
+3. **Provider 适配深度不均：** Anthropic 和 DeepSeek 测试最充分；其他 6 个 Provider 结构完整但验证较少
+4. **MCP 未端到端验证：** 客户端代码完整，未接入真实第三方 MCP server
 
-下一优先级：I015 Hooks 系统（含沙箱安全约束）→ Plan Mode（只读规划模式）。
-
-测试覆盖率是当前最显著的工程质量短板，建议在 I015 开发周期中同步建立集成测试基线。
+**下一优先级：** Agent Loop 集成测试基线 → I028 会话恢复 → MCP 端到端验证。
 
 ---
 
@@ -1186,4 +1271,4 @@ Copyright (c) 2026 Seed AI Contributors
 
 ---
 
-*文档版本：v0.9.1-r7　　最后更新：2026-04-04　　下次更新节点：I015 完成后*
+*文档版本：v0.9.1-alpha.24　　最后更新：2026-04-08　　下次更新节点：I028 完成后*

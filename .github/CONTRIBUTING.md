@@ -1,6 +1,8 @@
 # Contributing to Seed AI
 
-Seed AI is a research-grade CLI AI assistant built by studying Claude Code's full TypeScript source and implementing measurable improvements. Contributions are welcome — but this project has strong opinions about scope and quality.
+Seed AI is an early-stage CLI AI assistant (27 shipped features, alpha.24) built by studying Claude Code and DeerFlow-2.0 and implementing targeted improvements. Contributions are welcome — but this project has strong opinions about scope and quality.
+
+**Honest state:** Agent Loop end-to-end integration tests do not exist. This is the highest-priority contribution gap.
 
 ---
 
@@ -21,8 +23,8 @@ Read the [WHITEPAPER.md](../WHITEPAPER.md) — it explains every architectural d
 ### Clone and build
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/seed.git
-cd seed
+git clone https://github.com/jiayu6954-sudo/seed-ai.git
+cd seed-ai
 npm install
 npm run build          # tsup — under 2s
 npm link               # makes `seed` available globally
@@ -54,8 +56,10 @@ npm run test:run       # single pass (CI)
 
 ```
 src/
-├── agent/          # Loop, stream handler, context compression, system prompt
-├── tools/          # 7 native tools + cache + registry
+├── agent/          # Loop, stream handler, context compression, system prompt, research-loop (I024)
+├── tools/          # 10 native tools + cache + registry (with HooksRunner I027)
+├── hooks/          # PreToolUse/PostToolUse hook engine (I027)
+├── skills/         # Skills framework loader (I023)
 ├── ui/             # Ink components, theme, hooks
 ├── providers/      # AIProvider interface + 8 implementations
 ├── permissions/    # Per-tool permission management
@@ -64,7 +68,7 @@ src/
 ├── memory/         # Long-term memory + vector store + embeddings
 ├── storage/        # Storage Guard (I016)
 ├── config/         # Zod schema + settings loader
-├── commands/       # Slash command system
+├── commands/       # Slash command system (11 commands)
 ├── cli/commands/   # CLI subcommands (config, sessions, run, chat)
 └── utils/          # logger, stats, cost-calculator, token-budget-parser
 ```
