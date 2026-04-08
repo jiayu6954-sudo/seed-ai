@@ -9,7 +9,7 @@
 
 > Not a wrapper. Not a clone. A ground-up reimplementation that studied Claude Code and DeerFlow-2.0, then extended their architecture in directions both tools do not address: multi-provider support, cross-session memory, local LLMs, Docker sandboxing, and a sub-agent research loop.
 
-> **⚠️ Maturity warning:** Seed AI is an early-stage project maintained by one person. Core features work and are manually tested. **End-to-end integration tests for the Agent Loop do not exist.** Edge-case behavior (streaming interruption, hook failure during long context, network errors mid-tool-call) is largely unverified. Do not depend on this for production workflows without your own validation. Contributions to the test suite are the highest-value thing you can do — see [Quality & Testing](#quality--testing).
+> **⚠️ Maturity warning:** Seed AI is an early-stage project maintained by one person. Core features work and are manually tested. **Agent Loop integration tests exist for 4 core scenarios; edge-case behavior (streaming interruption, hook failure during long context, network errors mid-tool-call) is largely unverified.** Do not depend on this for production workflows without your own validation. Contributions to the test suite are the highest-value thing you can do — see [Quality & Testing](#quality--testing).
 
 ## Demo
 
@@ -306,8 +306,8 @@ Key settings:
 ## Known Limitations
 
 ### Test coverage (most important)
-- **No end-to-end integration tests for the Agent Loop.** Behavior under streaming interruption, mid-loop network errors, `hooks.failBehavior=block` edge cases, and long-context truncation is manually tested only. If you use Seed AI in critical workflows, validate edge cases yourself before depending on them.
-- Unit tests cover: permissions, tool cache, cost calculation, long-term memory (14 tests). Everything else is untested by automation.
+- **Agent Loop has basic integration test coverage (4 scenarios):** file_write end-to-end, Zod validation error recovery, maxIterations enforcement, CHECKPOINT detection. Edge cases (streaming interruption, mid-loop network errors, `hooks.failBehavior=block` under real hooks) are manually tested only.
+- Unit + integration tests: 18 total. Covers permissions, tool cache, cost calculation, long-term memory, and Agent Loop core path.
 
 ### Single-maintainer risk
 - Seed AI is built and maintained by one person. Any upstream breaking change — an AI provider API update, an Ollama tool-call protocol change, a Node.js ESM behavior shift — requires the maintainer to respond. For production-critical tooling, factor in this bus-factor risk.
@@ -408,26 +408,25 @@ Memory Layer
 ## Quality & Testing
 
 ```bash
-npm run test:run    # Vitest unit tests (14 tests)
+npm run test:run    # Vitest — 18 tests (14 unit + 4 integration)
 npm run typecheck   # tsc --noEmit, strict mode (0 errors)
 ```
 
 ### What is tested
-Unit tests (14) cover: long-term memory load/save/clear, permission resolution, tool result cache, cost calculation.
+- **Unit tests (14):** long-term memory load/save/clear, permission resolution, tool result cache, cost calculation
+- **Integration tests (4, mock provider — no API key needed):** file_write end-to-end, Zod validation error recovery, maxIterations enforcement, CHECKPOINT detection
 
 ### What is NOT tested (honest accounting)
 
 | Area | Test coverage | Risk |
 |------|--------------|------|
-| Agent Loop (runAgentLoop) | ❌ Zero | High — any refactor may silently break it |
+| Agent Loop — core path | ✅ Basic (4 scenarios) | Medium — happy path covered; edge cases not |
 | Streaming interruption recovery | ❌ Zero | High — unknown behavior on network drop |
 | Hooks block/warn under error | ❌ Zero | Medium — manually verified only |
 | CHECKPOINT marker edge cases | ❌ Zero | Medium |
 | Provider adapters (OpenAI, Groq, Gemini…) | ❌ Zero | Medium |
 | MCP client with real server | ❌ Zero | Medium |
 | Docker sandbox on Linux/macOS | ❌ Zero | Low-Medium |
-
-This is the project's most significant engineering gap. The Agent Loop is the core of the system and has no automated test coverage. Features like `hooks.failBehavior=block` and `[[CHECKPOINT]]` have been manually tested in happy-path scenarios only.
 
 **Contributions that add integration test coverage are the single highest-value thing you can contribute.** See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
@@ -457,20 +456,27 @@ This is the project's most significant engineering gap. The Agent Loop is the co
 
 ---
 
+## Project positioning
+
+Seed AI is a **personal research engineering project** — one maintainer, no production SLA, no roadmap commitments. It is not an organization-backed Claude Code alternative. It is an experiment in how far a single engineer can push a CLI AI assistant by studying production-grade reference implementations (Claude Code, DeerFlow-2.0) and building targeted improvements.
+
+Contributions are welcome and appreciated, but this project runs on spare time. Issue response times and PR review cadence reflect that reality. If you need guaranteed support, fork and self-maintain.
+
+---
+
 ## Contributing
 
-We welcome bug reports, feature ideas, and pull requests. Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) for:
+Bug reports, test contributions, and pull requests are welcome. Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) for:
 
 - Development setup (build, dev mode, typecheck, tests)
-- Innovation numbering conventions (I001–I016 done; I015 is next)
+- Innovation numbering conventions (I001–I027 done)
 - Code standards: TypeScript strict, Zod schemas, layered error handling, no speculative abstractions
 - PR checklist and what we will not merge
 
 **Where contributions matter most right now:**
-- Integration tests for the agent loop (end-to-end with real API calls)
+- Integration tests — especially streaming interruption, hook error paths, provider adapter validation
 - Windows-specific edge cases (path handling, terminal encoding)
 - Additional local LLM provider testing
-- I028 Session transcript restore
 
 ---
 

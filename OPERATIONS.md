@@ -2,12 +2,14 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-08 · v0.9.1-alpha.24 (r36c) · 下次更新节点：I028 完成后**
+**最后更新：2026-04-08 · v0.9.1-alpha.24 (r38) · 下次更新节点：集成测试扩展 / I028 讨论**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.24 r38  | 2026-04-08 | TEST: 首批 Agent Loop 集成测试 (4 场景) + 叙事基调修正 + 项目定位声明 |
+| alpha.24 r37  | 2026-04-08 | DOCS: README 诚实重写 — 移除 "production-grade"，扩展已知局限 |
 | alpha.24 r36c | 2026-04-08 | BUG FIX: CI #32–34 失败 — 新建文件未 git add 导致 import 断裂 |
 | alpha.24 r36b | 2026-04-08 | BUG FIX: git_commit `--cached` 无效语法 + 系统测试 8 项全通过 |
 | alpha.24 r36  | 2026-04-08 | I024 spawn_research · I025 git_commit · I026 CHECKPOINT · I027 Hooks |
@@ -19,6 +21,94 @@
 | v0.9.0 r30    | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
 | v0.8.0 r20    | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
 | v0.6.0        | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+
+---
+
+## 2026-04-08 · v0.9.1-r38 (集成测试 + 项目定位)
+
+### [TEST] 首批 Agent Loop 集成测试 — 4 场景
+
+**文件**：`test/agent/loop-integration.test.ts`（新建）  
+**提交**：`ea23376`
+
+**背景**：Agent Loop 此前零自动化测试，是项目最大的可信度缺口。  
+用户明确要求："不要再加新功能了 (I028-I030). 立即补充集成测试（优先级最高）"。
+
+**方案**：Mock Provider 模式 — 无需真实 API Key，CI 可直接运行。
+
+```typescript
+function mockProvider(responses: NormalizedMessage[]): AIProvider {
+  let callIndex = 0;
+  return {
+    stream(_params): ProviderStreamHandle {
+      return mockStream(responses[callIndex++]);
+    },
+  } as unknown as AIProvider;
+}
+```
+
+**4 个测试场景**：
+
+| # | 场景 | 验证内容 |
+|---|------|---------|
+| 1 | `file_write` 端到端 | 文件实际创建、`tool_result.isError=false`、事件序列完整 |
+| 2 | Zod 验证失败 | `isError=true`，错误信息含 "Invalid tool input"，Loop 不崩溃 |
+| 3 | `maxIterations` 上限 | 超出 2 次后抛出 `/exceeded 2 iterations/`，同时 emit `error` 事件 |
+| 4 | `[[CHECKPOINT]]` 检测 | emit `checkpoint` 事件，`stopReason="checkpoint"` |
+
+**关键 TypeScript fix**：  
+`PermissionDecision` 是字符串字面量联合类型 (`"allow" | "deny" | "allow-session"`)，不是对象。  
+测试中用 `async () => "allow" as const`，而非 `async () => ({ action: "allow" })`。
+
+**测试结果**：18 tests passed（14 unit + 4 integration）
+
+---
+
+### [DOCS] 叙事基调修正 + 项目定位声明
+
+**背景**：用户对以下措辞提出批评：
+- "production-grade" — 无 E2E 测试，不应自称生产级
+- "27 delivered innovations beyond Claude Code" — "beyond" 有竞争性误导  
+- 项目定位模糊（个人研究 vs 社区替代品）
+
+**修改范围**（全部文件）：
+
+| 文件 | 修改内容 |
+|-----|---------|
+| README.md | ⚠️ 警告更新、Known Limitations 更新、Quality 表格更新、新增 Project Positioning 章节 |
+| WHITEPAPER.md | 版本号、创新计数、叙事基调全面更新 |
+| CONTRIBUTING.md | 项目定位补充（"early-stage"、测试覆盖现状） |
+
+**README 新增项目定位声明**（`## Project positioning` 章节）：
+
+> Seed AI 是一个**个人研究性工程项目** — 一名维护者，无生产 SLA，无路线图承诺。  
+> 它不是组织支持的 Claude Code 替代品，而是研究如何通过研究参考实现（Claude Code、DeerFlow-2.0）  
+> 并构建针对性改进，单人工程师能推进 CLI AI 助手的边界的实验。
+
+---
+
+## 2026-04-08 · v0.9.1-r37 (README 诚实重写)
+
+### [DOCS] README 叙事基调修正
+
+**提交**：`7d28013`
+
+**触发原因**：用户提出 4 点技术批评：
+1. "production-grade" 措辞与零 E2E 测试现实矛盾
+2. CC 对比缺少"CC 故意不做这些"的上下文
+3. 单维护者风险在 README 中完全隐形
+4. Haiku 压缩成本警告埋在功能列表中，用户在成本敏感决策前可能看不到
+
+**修改内容**：
+
+| 位置 | 前 | 后 |
+|------|----|----|
+| 标题副标题 | "production-grade" | "production-ready architecture, actively seeking production validation" |
+| 创新描述 | "27 delivered innovations beyond Claude Code" | "27 design improvements inspired by Claude Code's architecture" |
+| 顶部警告 | 无 | ⚠️ Maturity warning（E2E 测试、单维护者） |
+| Known Limitations | 无此节 | 新增：测试覆盖表、单维护者风险、CC 比较范围说明 |
+| CC 比较 | 直接进入表格 | 新增前言段落（"Claude Code 选择不做这些，不是失败"） |
+| Quality & Testing | 含糊声明 | 详细分类表：已测 vs 未测，含风险级别 |
 
 ---
 
@@ -2211,4 +2301,4 @@ buildDiff() → tool_result { toolName, content: diffStr }
 
 ---
 
-*最后更新：2026-04-08 · v0.9.1-alpha.24 (r36c) · 下次更新节点：I028 完成后*
+*最后更新：2026-04-08 · v0.9.1-alpha.24 (r38) · 下次更新节点：集成测试扩展（streaming 中断、hook 错误路径）*
