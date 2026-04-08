@@ -65,7 +65,8 @@
 | §8.2 | 技术债务表 | Agent loop ❌ 需1-2月；WHITEPAPER ❌ 待更新 | Agent loop ⚠️ 基础已建立；WHITEPAPER ✅ 已完成 |
 | §12 | 综合评级表 | 测试质量 ★★☆☆☆ 无变化 | 测试质量 ★★½☆☆ ↑ |
 
-**提交：** `（待提交）`
+**验证：** `npm run test:run` — 18 passed；`npm run typecheck` — 0 errors。  
+**提交：** `8dcc6a0`（已推送）
 
 ---
 
