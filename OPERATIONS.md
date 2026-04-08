@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-04-08 · v0.9.1-r36b (alpha.24 bugfix)
+
+### [BUG] git_commit — `git status --porcelain --cached` 无效语法
+
+**文件**：`src/tools/git-commit.ts`（第 52 行）
+
+**问题**：`git status` 不接受 `--cached` 参数，导致检测暂存区是否为空时命令报错，进入 catch 分支，误判为"无法提交"。
+
+**修复**：改用正确命令 `git diff --cached --name-only`
+- 有暂存内容时：输出文件名列表（非空字符串）
+- 无暂存内容时：输出空字符串 → 返回 "Nothing to commit" 提示
+
+**发现方式**：实际测试 T2/T7 执行时捕获，测试代理 `a75579e9fa2ab400e` 自动修复并验证。
+
+**提交**：`8b1ca5f`
+
+---
+
 ## 2026-04-08 · v0.9.1-r36 (alpha.24)
 
 ### [I024] spawn_research — 孤立研究子智能体循环

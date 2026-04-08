@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
-**A production-grade TypeScript CLI AI coding assistant — built from scratch with 20 delivered innovations beyond Claude Code.**
+**A production-grade TypeScript CLI AI coding assistant — built from scratch with 27 delivered innovations beyond Claude Code.**
 
 > Not a wrapper. Not a clone. A ground-up reimplementation that systematically analyzed Claude Code's architecture and design patterns, then shipped measurable improvements in every critical dimension.
 
@@ -115,6 +115,42 @@ SEED_DATA_DIR=F:/seed-data seed        # relocate all data off the system drive 
 - Braille spinner during tool execution; status bar with live token/cost/budget/elapsed tracking
 - Primary buffer (not alternate screen) — terminal scrollback preserved, scrollbar works normally
 
+### Web Search (I022)
+Multi-provider search — no API key required (DuckDuckGo fallback):
+```bash
+# In session: just ask — AI calls web_search automatically
+"compare Nginx vs OpenResty performance 2025"
+"latest Claude API pricing"
+```
+Provider cascade: **Tavily** → **Brave** → **Serper** → **DuckDuckGo** (free, always works)  
+Configure keys in `~/.seed/settings.json` → `search.tavilyApiKey` / `search.braveApiKey` / `search.serperApiKey`
+
+### Research Sub-Agent (I024)
+`spawn_research` spawns an isolated sub-loop with only web search tools — keeps main context clean:
+- `depth="basic"` — up to 6 iterations (quick lookup)
+- `depth="deep"` — up to 15 iterations (thorough investigation)
+
+### Hooks System (I027)
+`PreToolUse` / `PostToolUse` shell hooks wrap every tool execution:
+```json
+{
+  "hooks": {
+    "preToolUse": [
+      { "tool": "file_write", "command": "npx tsc --noEmit 2>&1 | head -5", "failBehavior": "warn" }
+    ],
+    "postToolUse": [
+      { "tool": "file_write", "command": "npx eslint ${path} 2>&1 | tail -5", "failBehavior": "warn" }
+    ]
+  }
+}
+```
+Template variables: `${toolName}` `${path}` `${command}` `${query}` `${url}` `${cwd}`  
+`failBehavior: "block"` — hook failure prevents tool from running.
+
+### Human-in-the-Loop Checkpoints (I026)
+AI can pause for review by ending a response with `[[CHECKPOINT: reason]]`.  
+The system strips the marker, shows a ⏸ review prompt, and resumes when you reply.
+
 ### Slash Commands
 | Command | Description |
 |---------|-------------|
@@ -127,6 +163,8 @@ SEED_DATA_DIR=F:/seed-data seed        # relocate all data off the system drive 
 | `/status` | Session statistics overview |
 | `/diag` | Show last 30 WARN/ERROR lines from `~/.seed/debug.log` |
 | `/init` | Scan project and create `CLAUDE.md` context scaffold |
+| `/plan` | Rewrite input as structured phased plan (AI plans before acting) |
+| `/skill` | List loaded skills and their trigger keywords |
 
 ---
 
@@ -281,14 +319,19 @@ Key settings:
 CLI (index.ts)
     └── Ink TUI  ←→  useAgentLoop (React hook)
                           ├── Token Budget Parser (I010)
+                          ├── Skills Loader (I023)  ~/.seed/skills/
                           └── runAgentLoop (loop.ts)
                                 ├── SystemPrompt (static/dynamic split, I009)
+                                ├── CHECKPOINT detector (I026)  [[CHECKPOINT:reason]]
                                 ├── AIProvider (8 implementations)
                                 │     └── SmartLocalProvider (I011)
                                 ├── ToolRegistry
                                 │     ├── Cache (I002)
                                 │     ├── Sandbox (I005)
-                                │     └── MCPRegistry (I006)
+                                │     ├── MCPRegistry (I006)
+                                │     ├── HooksRunner (I027)  PreToolUse/PostToolUse
+                                │     └── ResearchRunner (I024) → research sub-loop
+                                │           └── runAgentLoop [restricted: web_search+web_fetch]
                                 └── ContextManager (I003 compression, triggers at 80%)
 
 Memory Layer
@@ -316,13 +359,34 @@ Memory Layer
 | **Model switching** | Interactive menu + single-command flags | None |
 | **MCP** | **Client** + registry + lifecycle management | **Server** only |
 
+### Seed AI leads (updated alpha.24)
+
+| Dimension | Seed AI | Claude Code |
+|-----------|---------|-------------|
+| **Providers** | 8+ (Anthropic, OpenAI, DeepSeek, Groq, Gemini, Ollama, OpenRouter, Moonshot) | Anthropic only |
+| **Local LLMs** | Auto-discover, tool-cap probe, XML fallback | None |
+| **Long-term memory** | 3-layer, Haiku extraction, semantic vector search | None |
+| **Tool result cache** | Session-level, write-before-invalidate | None |
+| **web_fetch fallback** | native → curl auto-downgrade, charset-aware | None |
+| **Context compression** | LLM-powered semantic summary at 80% window | Conversation compaction via `/compact` |
+| **Token budget** | Natural language: `"+500k"`, `"2M tokens"` | Static config only |
+| **Docker sandbox** | 3 isolation levels + graceful host fallback | None |
+| **Storage quotas** | Auto-enforced + SEED_DATA_DIR relocation | None |
+| **Model switching** | Interactive menu + single-command flags | None |
+| **MCP** | **Client** + registry + lifecycle management | **Server** only |
+| **Web search** | Multi-provider (Tavily/Brave/Serper/DDG) | None |
+| **Research sub-agent** | Isolated sub-loop, depth=basic/deep | None |
+| **Hooks** | PreToolUse/PostToolUse shell hooks, block/warn | `PreToolUse` / `PostSampling` |
+| **Plan Mode** | `/plan` rewrites prompt with phased planning | Available |
+| **Skills framework** | `~/.seed/skills/*.md` reusable protocols | None |
+| **Human-in-the-loop** | `[[CHECKPOINT]]` marker pauses agent | None |
+| **git_commit tool** | Conventional commits, staged-change detection | None |
+
 ### Claude Code leads
 
-| Dimension | Claude Code advantage | Seed AI roadmap |
+| Dimension | Claude Code advantage | Seed AI status |
 |-----------|----------------------|---------------|
-| **Hooks system** | `PreToolUse` / `PostSampling` programmable hooks | I021 — next priority |
-| **Plan Mode** | Read-only planning mode | Planned |
-| **VSCode integration** | Full IDE extension + inline code | Out of scope (CLI-first positioning) |
+| **VSCode integration** | Full IDE extension + inline code | Out of scope (CLI-first) |
 | **Permission granularity** | Tool-level + path-level, session learning | Iterating |
 | **Test coverage / maturity** | Large-scale production validation | See below |
 
@@ -346,19 +410,22 @@ npm run typecheck   # tsc --noEmit, strict mode
 | ID | Feature | Status |
 |----|---------|--------|
 | I001–I013 | Parallel exec, cache, LLM compression, memory, sandbox, MCP, budget, system prompt, local LLM, vector memory, model switcher | ✅ Done |
-| I016 | Storage Guard + SEED_DATA_DIR | ✅ Done (v0.9.1) |
-| I015 | Static/Dynamic Ink rendering split — zero-repaint completed messages | ✅ Done (v0.9.1-alpha.15) |
-| I016 | Timer suppression for zero-flicker permission prompts | ✅ Done (v0.9.1-alpha.15) |
-| I017 | `/diag` in-session log reader — diagnose without describing symptoms | ✅ Done (v0.9.1-alpha.16) |
-| I018 | Render self-monitoring — rps tracking, state transition logging | ✅ Done (v0.9.1-alpha.16) |
-| I019 | `/init` project context scaffold → CLAUDE.md | ✅ Done (v0.9.1-alpha.22) |
-| I020 | Industrial workflow awareness — 6-phase delivery + document generation | ✅ Done (v0.9.1-alpha.21) |
-| I021 | Hooks system: `PreToolUse` / `PostToolUse` | Next |
-| — | Plan Mode: read-only planning, user confirms execution | Planned |
-| — | Session persistence (transcript restore) | Planned |
+| I015–I016 | Static/Dynamic Ink split, zero-repaint completed messages, timer suppression | ✅ Done (alpha.15) |
+| I017–I018 | `/diag` log reader, render self-monitoring | ✅ Done (alpha.16) |
+| I019–I020 | `/init` scaffold, industrial 6-phase delivery workflow | ✅ Done (alpha.22) |
+| I021 | Plan Mode — `/plan` structured phased planning | ✅ Done (alpha.23) |
+| I022 | `web_search` — Tavily/Brave/Serper/DuckDuckGo multi-provider | ✅ Done (alpha.23) |
+| I023 | Skills framework — `~/.seed/skills/*.md` reusable protocols | ✅ Done (alpha.23) |
+| I024 | `spawn_research` — isolated research sub-agent (basic/deep depth) | ✅ Done (alpha.24) |
+| I025 | `git_commit` — conventional commits, closes engineering delivery loop | ✅ Done (alpha.24) |
+| I026 | CHECKPOINT — `[[CHECKPOINT:reason]]` human-in-the-loop pause | ✅ Done (alpha.24) |
+| I027 | Hooks — `PreToolUse`/`PostToolUse` shell hooks, block/warn | ✅ Done (alpha.24) |
+| I028 | Session transcript export/import (restore prior sessions) | Planned |
+| I029 | Streaming diff renderer for `file_edit` (inline before/after) | Planned |
+| I030 | Auto-PR draft — `git_commit` chains into `gh pr create` | Planned |
 | — | Integration test suite | Help wanted |
 
-> **v0.9.1-alpha.22** — 20 innovations shipped. Key stability fixes: cross-provider memory extraction, tool message boundary cleaning, max_tokens auto-continue with dummy tool_results, 200-iteration loop.
+> **v0.9.1-alpha.24** — 27 innovations shipped. I024–I027 from DeerFlow-2.0 study: research sub-agent, git workflow tooling, human-in-the-loop checkpoints, configurable shell hooks.
 
 ---
 
@@ -375,7 +442,7 @@ We welcome bug reports, feature ideas, and pull requests. Please read [CONTRIBUT
 - Integration tests for the agent loop (end-to-end with real API calls)
 - Windows-specific edge cases (path handling, terminal encoding)
 - Additional local LLM provider testing
-- I021 Hooks system implementation
+- I028 Session transcript restore
 
 ---
 
@@ -383,7 +450,7 @@ We welcome bug reports, feature ideas, and pull requests. Please read [CONTRIBUT
 
 Seed AI was built by systematically studying Claude Code's architecture, design patterns, and engineering decisions. The color system, diff rendering values, and MCP protocol integration are informed by that study. This project stands on the shoulders of Anthropic's engineering work — the goal is to push the open-source ecosystem forward, not to compete with or diminish it.
 
-20 delivered innovations (I001–I020) are documented in [WHITEPAPER.md](WHITEPAPER.md). Real-world validation: [CDN Edge System Case Study](CASE_STUDY_CDN.md) — building a production CDN gateway from scratch using Seed AI as the sole engineering assistant.
+27 delivered innovations (I001–I027) are documented in [WHITEPAPER.md](WHITEPAPER.md). Real-world validation: [CDN Edge System Case Study](CASE_STUDY_CDN.md) — building a production CDN gateway from scratch using Seed AI as the sole engineering assistant.
 
 ---
 
