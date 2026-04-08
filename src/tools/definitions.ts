@@ -204,4 +204,62 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ["query"],
     },
   },
+  {
+    name: "git_commit",
+    description:
+      "Stage and commit changes to the current git repository with a conventional commit message. " +
+      "Use this after completing a logical unit of work to preserve progress and make changes reversible.\n\n" +
+      "WHEN TO USE:\n" +
+      "- After implementing a complete feature or fix\n" +
+      "- After finishing a refactoring session\n" +
+      "- After generating a document or config file\n" +
+      "- Whenever the user says 'commit', 'save progress', or 'git commit'\n\n" +
+      "COMMIT MESSAGE FORMAT: Use conventional commits — feat/fix/docs/refactor/test/chore(scope): description\n" +
+      "Examples: 'feat(auth): add JWT validation', 'fix(loop): handle max_tokens with pending tools'",
+    input_schema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "Conventional commit message (type(scope): description)",
+        },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Specific file paths to stage. If omitted, stages all tracked modified files (git add -u).",
+        },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "spawn_research",
+    description:
+      "Spawn a dedicated Research Sub-Agent that searches the web and returns a structured summary. " +
+      "Use this when you need deep, multi-source research BEFORE writing code or documents — " +
+      "the sub-agent runs in isolation so it doesn't pollute the main conversation context.\n\n" +
+      "WHEN TO USE:\n" +
+      "- Need to compare multiple technologies (e.g. 'OpenResty vs Nginx performance')\n" +
+      "- Need to look up current best practices, pricing, or API documentation\n" +
+      "- Need to research error messages or debugging approaches\n" +
+      "- Any task requiring 3+ web searches to answer properly\n\n" +
+      "depth='basic': up to 6 iterations (quick lookup)\n" +
+      "depth='deep':  up to 15 iterations (thorough investigation)",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The research question or topic to investigate",
+        },
+        depth: {
+          type: "string",
+          enum: ["basic", "deep"],
+          description: "Research depth: 'basic' (quick, 6 iterations) or 'deep' (thorough, 15 iterations). Default: basic",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];

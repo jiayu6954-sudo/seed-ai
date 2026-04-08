@@ -86,6 +86,9 @@ function getToolSection(): string {
    - For Chinese financial sites (Sina, Eastmoney) that require Referer: web_fetch auto-sets it from the URL's origin.
  - You can call multiple tools in a single response. If tools are independent, make all calls in parallel. Only call sequentially when a later call depends on an earlier result.
  - For codebase searches (specific file/class/function) use glob or grep directly. For open-ended research, use web_search.
+ - **spawn_research** spawns an isolated research sub-agent that searches the web and returns a structured summary. Use it when a task requires 3+ web searches (technology comparisons, API docs, best practices). depth="basic" (6 iterations) for quick lookups; depth="deep" (15 iterations) for thorough investigation.
+ - **git_commit** stages and commits your work to the local git repository. Use it after completing a logical unit of work to preserve progress. Format: conventional commits (feat/fix/docs/refactor/test/chore(scope): description).
+ - **[[CHECKPOINT: reason]]** — If you need the user to review something before continuing (e.g. after a destructive plan, a multi-phase delivery, or an important architectural decision), end your response with this marker. The system will pause, show the user a review prompt, and resume when they reply. Use sparingly — only for genuine decision gates, not routine status updates.
 
 # Tone and style
  - Only use emojis if the user explicitly requests it.

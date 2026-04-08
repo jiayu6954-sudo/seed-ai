@@ -31,6 +31,8 @@ export const SettingsSchema = z.object({
       grep: PermissionLevelSchema.default("auto"),
       web_fetch: PermissionLevelSchema.default("ask"),
       web_search: PermissionLevelSchema.default("auto"),
+      git_commit: PermissionLevelSchema.default("ask"),
+      spawn_research: PermissionLevelSchema.default("auto"),
     })
     .default({}),
 
@@ -38,7 +40,7 @@ export const SettingsSchema = z.object({
     .array(
       z.object({
         tool: z.union([
-          z.enum(["bash", "file_read", "file_write", "file_edit", "glob", "grep", "web_fetch", "web_search"]),
+          z.enum(["bash", "file_read", "file_write", "file_edit", "glob", "grep", "web_fetch", "web_search", "git_commit", "spawn_research"]),
           z.literal("*"),
         ]),
         level: PermissionLevelSchema,
@@ -148,6 +150,32 @@ export const SettingsSchema = z.object({
       braveApiKey: z.string().optional(),
       /** Serper API key — https://serper.dev (Google results, 2500 free/mo) */
       serperApiKey: z.string().optional(),
+    })
+    .default({}),
+
+  // ── Hooks (I027) — PreToolUse / PostToolUse shell commands ───────────────
+  hooks: z
+    .object({
+      /** Commands to run BEFORE a tool executes. ${toolName}, ${path}, ${command}, ${cwd} available. */
+      preToolUse: z
+        .array(
+          z.object({
+            tool: z.string().describe("Tool name to match, or '*' for all tools"),
+            command: z.string().describe("Shell command to execute (supports ${var} templates)"),
+            failBehavior: z.enum(["warn", "block"]).default("warn"),
+          }),
+        )
+        .default([]),
+      /** Commands to run AFTER a tool executes. Output is appended to tool result for AI to see. */
+      postToolUse: z
+        .array(
+          z.object({
+            tool: z.string(),
+            command: z.string(),
+            failBehavior: z.enum(["warn", "block"]).default("warn"),
+          }),
+        )
+        .default([]),
     })
     .default({}),
 

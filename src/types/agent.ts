@@ -35,7 +35,9 @@ export type AgentEvent =
   | { type: "tool_denied"; toolId: string; toolName: string }
   | { type: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
   | { type: "done"; stopReason: string }
-  | { type: "error"; error: Error };
+  | { type: "error"; error: Error }
+  /** I026: Human-in-the-loop checkpoint — agent paused for user review */
+  | { type: "checkpoint"; message: string };
 
 export interface AgentLoopOptions {
   model: string;          // string, not ModelId — providers accept any model string
@@ -44,6 +46,8 @@ export interface AgentLoopOptions {
   conversationHistory: ConversationMessage[];
   onEvent: (event: AgentEvent) => void;
   signal?: AbortSignal;
+  /** I024: cap iterations for sub-loops (research loop uses 15, main loop uses 200) */
+  maxIterations?: number;
   /** Innovation 8: token budget guard */
   tokenBudget?: {
     /** Warn (amber) when cumulative tokens exceed this % of hardLimit */

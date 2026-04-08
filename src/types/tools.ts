@@ -16,7 +16,9 @@ export type ToolName =
   | "glob"
   | "grep"
   | "web_fetch"
-  | "web_search";
+  | "web_search"
+  | "git_commit"
+  | "spawn_research";
 
 export interface ToolExecutionContext {
   cwd: string;
@@ -85,6 +87,16 @@ export interface WebSearchInput {
   maxResults?: number;
 }
 
+export interface GitCommitInput {
+  message: string;
+  files?: string[];
+}
+
+export interface SpawnResearchInput {
+  query: string;
+  depth?: "basic" | "deep";
+}
+
 export type ToolInput =
   | BashInput
   | FileReadInput
@@ -93,4 +105,6 @@ export type ToolInput =
   | GlobInput
   | GrepInput
   | WebFetchInput
-  | WebSearchInput;
+  | WebSearchInput
+  | GitCommitInput
+  | SpawnResearchInput;

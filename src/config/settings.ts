@@ -86,6 +86,8 @@ export function applyCliOverrides(
       grep: "auto",
       web_fetch: "auto",
       web_search: "auto",
+      git_commit: "auto",
+      spawn_research: "auto",
     };
   }
   if (opts.denyAll) {
@@ -98,6 +100,8 @@ export function applyCliOverrides(
       grep: "auto",
       web_fetch: "deny",
       web_search: "auto",
+      git_commit: "deny",
+      spawn_research: "auto",
     };
   }
 

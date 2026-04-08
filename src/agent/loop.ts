@@ -9,7 +9,9 @@ import { SessionStats } from "../utils/stats.js";
 import { calculateCost } from "../utils/cost-calculator.js";
 import { logger } from "../utils/logger.js";
 
-const MAX_ITERATIONS = 200;
+const DEFAULT_MAX_ITERATIONS = 200;
+// I026: Pattern the AI uses to signal a checkpoint pause
+const CHECKPOINT_RE = /\[\[CHECKPOINT(?::\s*(.*?))?\]\]/s;
 
 /**
  * Innovation 1: Parallel Tool Execution
@@ -41,8 +43,9 @@ export async function runAgentLoop(
   };
 
   let iterations = 0;
+  const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
-  while (iterations < MAX_ITERATIONS) {
+  while (iterations < maxIterations) {
     iterations++;
 
     if (options.signal?.aborted) {
@@ -137,7 +140,26 @@ export async function runAgentLoop(
 
     // ── 6. 检查 stop_reason ──────────────────────────────────────────────
     if (message.stop_reason === "end_turn" || message.stop_reason === "stop_sequence") {
-      options.onEvent({ type: "done", stopReason: message.stop_reason });
+      // I026: scan text content for [[CHECKPOINT: reason]] markers
+      // When found: strip the marker, emit checkpoint event, pause loop for user review
+      let checkpointMessage: string | null = null;
+      for (const block of message.content) {
+        if (block.type === "text") {
+          const match = CHECKPOINT_RE.exec(block.text);
+          if (match) {
+            checkpointMessage = (match[1] ?? "Phase complete").trim();
+            // Strip the marker from the visible text
+            block.text = block.text.replace(CHECKPOINT_RE, "").trim();
+            break;
+          }
+        }
+      }
+      if (checkpointMessage !== null) {
+        options.onEvent({ type: "checkpoint", message: checkpointMessage });
+        options.onEvent({ type: "done", stopReason: "checkpoint" });
+      } else {
+        options.onEvent({ type: "done", stopReason: message.stop_reason });
+      }
       return { finalMessage: message, updatedHistory: messages, totalUsage };
     }
 
@@ -226,7 +248,7 @@ export async function runAgentLoop(
     return { finalMessage: message, updatedHistory: messages, totalUsage };
   }
 
-  const err = new Error(`Agent loop exceeded ${MAX_ITERATIONS} iterations.`);
+  const err = new Error(`Agent loop exceeded ${maxIterations} iterations.`);
   options.onEvent({ type: "error", error: err });
   throw err;
 }

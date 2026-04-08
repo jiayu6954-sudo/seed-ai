@@ -20,6 +20,8 @@ import { SessionStats } from "../../utils/stats.js";
 import { logger } from "../../utils/logger.js";
 import { handleSlashCommand } from "../../commands/slash.js";
 import { parseTokenBudget, stripTokenBudgetPhrase } from "../../utils/token-budget-parser.js";
+import { runResearchLoop } from "../../agent/research-loop.js";
+import type { ResearchRunner } from "../../tools/registry.js";
 
 interface UseAgentLoopOptions {
   settings: DevAISettings;
@@ -311,7 +313,22 @@ export function useAgentLoop({
         serperApiKey:  settings.search?.serperApiKey,
         defaultProvider: settings.search?.defaultProvider,
       };
-      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox, searchConfig);
+      // I024: research sub-loop runner injected to avoid circular import
+      const researchRunner: ResearchRunner = (query, depth, onProgress) =>
+        runResearchLoop({
+          query,
+          depth: depth ?? "basic",
+          provider,
+          model: settings.model,
+          maxTokens: Math.min(settings.maxTokens, 8192),
+          searchConfig,
+          cwd,
+          onProgress,
+          signal: abortControllerRef.current?.signal,
+        });
+      // I027: hooks config from settings
+      const hooksConfig = settings.hooks ?? {};
+      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox, searchConfig, researchRunner, undefined, hooksConfig);
       const permissions = new PermissionManager(settings, promptUser, !!activeSandbox);
 
       // Innovation 3: inject summary context from prior compressions
@@ -476,6 +493,18 @@ export function useAgentLoop({
             // race where updateLastAssistantMessage (isStreaming:true) overwrites
             // finalizeLastMessage (isStreaming:false) within the same React batch.
             setCurrentActivity("");
+            onStateChange("idle");
+            break;
+
+          case "checkpoint":
+            // I026: agent requested human review — show system message and pause
+            finalizeLastMessage();
+            appendMessage({
+              id: randomUUID(),
+              role: "system",
+              content: [{ type: "text", text: `⏸ **Checkpoint**: ${event.message}\n\nReview the above and reply to continue.` }],
+              timestamp: new Date(),
+            });
             onStateChange("idle");
             break;
 

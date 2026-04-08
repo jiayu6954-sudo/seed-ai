@@ -8,6 +8,8 @@ import { executeGlob } from "./glob.js";
 import { executeGrep } from "./grep.js";
 import { executeWebFetch } from "./web-fetch.js";
 import { executeWebSearch, type SearchConfig } from "./web-search.js";
+import { executeGitCommit } from "./git-commit.js";
+import { runPreToolHooks, runPostToolHooks, type HooksConfig } from "../hooks/runner.js";
 import { ToolCache } from "./cache.js";
 import { MCPRegistry } from "../mcp/registry.js";
 import { SandboxManager } from "../sandbox/manager.js";
@@ -15,6 +17,7 @@ import type {
   ToolDefinition,
   ToolResult,
   ToolExecutionContext,
+  ToolName,
   BashInput,
   FileReadInput,
   FileWriteInput,
@@ -23,9 +26,18 @@ import type {
   GrepInput,
   WebFetchInput,
   WebSearchInput,
+  GitCommitInput,
+  SpawnResearchInput,
 } from "../types/tools.js";
 import { z } from "zod";
 import { logger } from "../utils/logger.js";
+
+/** I024: injected factory for the research sub-loop — avoids circular import */
+export type ResearchRunner = (
+  query: string,
+  depth: "basic" | "deep",
+  onProgress: (msg: string) => void,
+) => Promise<{ summary: string; searchCount: number; fetchCount: number }>;
 
 // Zod schemas for runtime input validation
 const BashSchema = z.object({ command: z.string(), timeout: z.number().optional() });
@@ -44,6 +56,14 @@ const WebSearchSchema = z.object({
   query: z.string(),
   provider: z.enum(["auto", "tavily", "brave", "serper", "duckduckgo"]).optional(),
   maxResults: z.number().optional(),
+});
+const GitCommitSchema = z.object({
+  message: z.string(),
+  files: z.array(z.string()).optional(),
+});
+const SpawnResearchSchema = z.object({
+  query: z.string(),
+  depth: z.enum(["basic", "deep"]).optional(),
 });
 
 /** I009-F: Claude Code's DEFAULT_MAX_RESULT_SIZE_CHARS — hard cap per tool result */
@@ -70,20 +90,37 @@ export class ToolRegistry {
   private mcpRegistry: MCPRegistry | null = null;
   private sandbox: SandboxManager | null = null;
   private searchConfig: SearchConfig;
+  private researchRunner: ResearchRunner | null = null;
+  private allowedTools: Set<ToolName> | null = null;
+  private hooksConfig: HooksConfig;
   // Innovation 2: per-session tool result cache
   readonly cache = new ToolCache();
 
-  constructor(cwd: string, mcpRegistry?: MCPRegistry, sandbox?: SandboxManager, searchConfig?: SearchConfig) {
+  constructor(
+    cwd: string,
+    mcpRegistry?: MCPRegistry,
+    sandbox?: SandboxManager,
+    searchConfig?: SearchConfig,
+    researchRunner?: ResearchRunner,
+    allowedTools?: Set<ToolName>,
+    hooksConfig?: HooksConfig,
+  ) {
     this.cwd = cwd;
     this.mcpRegistry = mcpRegistry ?? null;
     this.sandbox = sandbox ?? null;
     this.searchConfig = searchConfig ?? {};
+    this.researchRunner = researchRunner ?? null;
+    this.allowedTools = allowedTools ?? null;
+    this.hooksConfig = hooksConfig ?? {};
   }
 
-  /** Returns tool definitions in provider-neutral format (native + MCP) */
+  /** Returns tool definitions in provider-neutral format (native + MCP).
+   *  I024: when allowedTools is set (research sub-loop), only return those tools. */
   getDefinitions(): ToolDefinition[] {
     const mcpDefs = this.mcpRegistry?.getToolDefinitions() ?? [];
-    return [...TOOL_DEFINITIONS, ...mcpDefs];
+    const all = [...TOOL_DEFINITIONS, ...mcpDefs];
+    if (!this.allowedTools) return all;
+    return all.filter((d) => this.allowedTools!.has(d.name as ToolName));
   }
 
   /** @deprecated use getDefinitions() */
@@ -125,6 +162,12 @@ export class ToolRegistry {
     // Innovation 2: invalidate cache on writes BEFORE execution
     // (so any file_read that happens after this write gets fresh content)
     this.cache.invalidateForWrite(nativeName, rawInput);
+
+    // I027: run pre-tool hooks
+    const preHook = await runPreToolHooks(this.hooksConfig, toolName, rawInput as Record<string, unknown>, this.cwd);
+    if (preHook.blocked) {
+      return { content: `[pre-hook blocked tool]\n${preHook.output}`, isError: true, fromCache: false };
+    }
 
     try {
       let result: ToolResult;
@@ -202,6 +245,33 @@ export class ToolRegistry {
           result = await executeWebSearch(input, ctx, this.searchConfig);
           break;
         }
+        case "git_commit": {
+          const input = GitCommitSchema.parse(rawInput) as GitCommitInput;
+          result = await executeGitCommit(input, ctx);
+          break;
+        }
+        case "spawn_research": {
+          const input = SpawnResearchSchema.parse(rawInput) as SpawnResearchInput;
+          if (!this.researchRunner) {
+            result = { content: "spawn_research is not available in this context.", isError: true };
+          } else {
+            const depth = input.depth ?? "basic";
+            const progressLines: string[] = [];
+            const summary = await this.researchRunner(input.query, depth, (msg) => {
+              progressLines.push(msg);
+            });
+            result = {
+              content: [
+                `## Research Summary`,
+                summary.summary,
+                ``,
+                `*Searches: ${summary.searchCount} | Fetches: ${summary.fetchCount}*`,
+              ].join("\n"),
+              isError: false,
+            };
+          }
+          break;
+        }
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true, fromCache: false };
       }
@@ -211,6 +281,20 @@ export class ToolRegistry {
 
       // Innovation 2: store result in cache
       this.cache.set(nativeName, rawInput, result);
+
+      // I027: run post-tool hooks and append output to result
+      const postHook = await runPostToolHooks(this.hooksConfig, toolName, rawInput as Record<string, unknown>, this.cwd);
+      if (postHook.output) {
+        result = { ...result, content: result.content + "\n\n" + postHook.output };
+      }
+      if (postHook.blocked) {
+        result = { ...result, isError: true };
+      }
+
+      // Also prepend any pre-hook output so AI can see it
+      if (preHook.output) {
+        result = { ...result, content: `[pre-hook output]\n${preHook.output}\n\n` + result.content };
+      }
 
       return { ...result, fromCache: false };
     } catch (err) {
