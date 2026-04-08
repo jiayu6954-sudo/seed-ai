@@ -5,11 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
-**A production-grade TypeScript CLI AI coding assistant — built from scratch with 27 delivered innovations beyond Claude Code.**
+**A TypeScript CLI AI coding assistant built from scratch — 27 shipped features, clean architecture, honest about its limitations.**
 
-> Not a wrapper. Not a clone. A ground-up reimplementation that systematically analyzed Claude Code's architecture and design patterns, then shipped measurable improvements in every critical dimension.
+> Not a wrapper. Not a clone. A ground-up reimplementation that studied Claude Code's architecture, then extended it in directions Claude Code does not address: multi-provider support, cross-session memory, local LLMs, Docker sandboxing, and a DeerFlow-inspired sub-agent research loop.
 
-> **Status:** Active development. Unit tests cover core modules; integration tests are limited — contributions welcome. See [Quality & Testing](#quality--testing).
+> **⚠️ Maturity warning:** Seed AI is an early-stage project maintained by one person. Core features work and are manually tested. **End-to-end integration tests for the Agent Loop do not exist.** Edge-case behavior (streaming interruption, hook failure during long context, network errors mid-tool-call) is largely unverified. Do not depend on this for production workflows without your own validation. Contributions to the test suite are the highest-value thing you can do — see [Quality & Testing](#quality--testing).
 
 ## Demo
 
@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/de6061b3-a7ee-4d3e-bf46-3fade4ab4c37
 ### Core Agent Engine
 - **Parallel tool execution** — permissions collected serially (clear UX), execution via `Promise.allSettled()` — N×T latency → ~1.2×T
 - **Session-level tool cache** — idempotent reads (`file_read`, `glob`, `grep`, `web_fetch`) cached; write ops invalidate before execution to prevent stale reads
-- **LLM-driven context compression** — triggers at 80% context window; Haiku ($0.0002/compress) summarizes pruned messages into system prompt; multi-round cumulative summaries preserved
+- **LLM-driven context compression** — triggers at 80% context window; Haiku summarizes pruned messages into system prompt; multi-round cumulative summaries preserved. **Cost note:** each compression call costs ~$0.0002–0.001 depending on context size. For heavy users (10+ compressions/day), this adds up — disable with `seed config set memory.enabled false` if cost is a concern.
 - **Token Budget Guard** — natural language budget (`"+500k"`, `"2M tokens"`) parsed inline, hard limit enforced per loop iteration
 - **200-iteration loop** with Ctrl+C abort, streaming output, real-time diff rendering
 
@@ -305,11 +305,22 @@ Key settings:
 
 ## Known Limitations
 
-- **SPA / JavaScript-rendered content**: `web_fetch` fetches initial HTML only; React/Vue/Angular apps return the shell, not the dynamic data. Puppeteer-level tooling is out of scope for a CLI assistant.
-- **Heavy bot protection**: DataDome, Cloudflare Enterprise Bot Management are not bypassable without a full browser fingerprint (TLS characteristics, JS execution, behavioral analysis).
-- **Docker requires manual start**: On Windows, Docker Desktop must be running before use if `sandbox.enabled=true`. Seed AI cannot start the Docker daemon automatically.
-- **Docker on Windows**: Requires WSL2 integration and drive sharing configured in Docker Desktop settings.
-- **Local LLM tool calls**: Reasoning-focused models (e.g. DeepSeek-R1) rarely emit tool-call syntax reliably. Use tool-capable models: `qwen2.5-coder`, `llama3.1`, `mistral` for code tasks.
+### Test coverage (most important)
+- **No end-to-end integration tests for the Agent Loop.** Behavior under streaming interruption, mid-loop network errors, `hooks.failBehavior=block` edge cases, and long-context truncation is manually tested only. If you use Seed AI in critical workflows, validate edge cases yourself before depending on them.
+- Unit tests cover: permissions, tool cache, cost calculation, long-term memory (14 tests). Everything else is untested by automation.
+
+### Single-maintainer risk
+- Seed AI is built and maintained by one person. Any upstream breaking change — an AI provider API update, an Ollama tool-call protocol change, a Node.js ESM behavior shift — requires the maintainer to respond. For production-critical tooling, factor in this bus-factor risk.
+
+### Scope of the Claude Code comparison
+- Claude Code is Anthropic's reference CLI client for the Claude API — its design goal is deep Claude-model integration, not multi-provider flexibility. Seed AI "exceeds" Claude Code in dimensions Claude Code deliberately does not address (multi-provider, local LLMs, cross-session memory). If your workflow is 100% Claude-specific and you want the tightest model integration, Claude Code is the better choice. Seed AI is better if you want provider flexibility, local LLM support, or cross-session memory.
+
+### Technical limitations
+- **SPA / JavaScript-rendered content**: `web_fetch` fetches initial HTML only; React/Vue/Angular apps return the shell, not dynamic data.
+- **Heavy bot protection**: DataDome, Cloudflare Enterprise Bot Management require full browser fingerprinting — not bypassable.
+- **Docker requires manual start**: On Windows, Docker Desktop must be running before use if `sandbox.enabled=true`.
+- **Local LLM tool calls**: Reasoning-focused models (e.g. DeepSeek-R1) rarely emit reliable tool-call syntax. Use `qwen2.5-coder`, `llama3.1`, or `mistral` for code tasks.
+- **Provider adapter depth varies**: Anthropic and DeepSeek are most tested. OpenAI, Groq, Gemini, OpenRouter, Moonshot adapters are structurally complete but have less real-world validation.
 
 ---
 
@@ -343,7 +354,9 @@ Memory Layer
 
 ## Comparison with Claude Code
 
-### Seed AI leads
+> **Context for this comparison:** Claude Code is Anthropic's reference CLI client, optimized for deep integration with Claude models. It does not aim to be a multi-provider or local-LLM platform. The dimensions where Seed AI "leads" are largely dimensions Claude Code chose not to address — not areas where Claude Code tried and failed. If you use Claude exclusively and want the best model integration, Claude Code is the right tool. The comparison below is useful for understanding the scope of each project, not for declaring a winner.
+
+### Where Seed AI adds capability Claude Code does not have
 
 | Dimension | Seed AI | Claude Code |
 |-----------|-------|-------------|
@@ -395,13 +408,28 @@ Memory Layer
 ## Quality & Testing
 
 ```bash
-npm run test:run    # Vitest unit tests
-npm run typecheck   # tsc --noEmit, strict mode
+npm run test:run    # Vitest unit tests (14 tests)
+npm run typecheck   # tsc --noEmit, strict mode (0 errors)
 ```
 
-- Unit tests cover core modules: permissions, tool cache, context compression, cost tracking, sandbox, vector store, token budget parser, storage guard.
-- **Integration tests are currently limited** — end-to-end agent loop tests against live APIs are a known gap.
-- Contributions that add integration test coverage are especially welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+### What is tested
+Unit tests (14) cover: long-term memory load/save/clear, permission resolution, tool result cache, cost calculation.
+
+### What is NOT tested (honest accounting)
+
+| Area | Test coverage | Risk |
+|------|--------------|------|
+| Agent Loop (runAgentLoop) | ❌ Zero | High — any refactor may silently break it |
+| Streaming interruption recovery | ❌ Zero | High — unknown behavior on network drop |
+| Hooks block/warn under error | ❌ Zero | Medium — manually verified only |
+| CHECKPOINT marker edge cases | ❌ Zero | Medium |
+| Provider adapters (OpenAI, Groq, Gemini…) | ❌ Zero | Medium |
+| MCP client with real server | ❌ Zero | Medium |
+| Docker sandbox on Linux/macOS | ❌ Zero | Low-Medium |
+
+This is the project's most significant engineering gap. The Agent Loop is the core of the system and has no automated test coverage. Features like `hooks.failBehavior=block` and `[[CHECKPOINT]]` have been manually tested in happy-path scenarios only.
+
+**Contributions that add integration test coverage are the single highest-value thing you can contribute.** See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 ---
 
