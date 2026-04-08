@@ -2,22 +2,57 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-08 · v0.9.1-alpha.24 · 下次更新节点：I028 完成后**
+**最后更新：2026-04-08 · v0.9.1-alpha.24 (r36c) · 下次更新节点：I028 完成后**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
-| alpha.24 r36b | 2026-04-08 | BUG FIX: git_commit --cached 无效语法 |
-| alpha.24 r36 | 2026-04-08 | I024 spawn_research · I025 git_commit · I026 CHECKPOINT · I027 Hooks |
-| alpha.23 r35 | 2026-04-08 | I022 web_search · I021 Plan Mode · I023 Skills 框架 |
-| alpha.22 r34 | 2026-04-07 | I019 /init · I020 工业交付工作流 · Windows/CDN 知识注入 |
-| alpha.20 r33 | 2026-04-06 | I018 渲染自监控 · max_tokens file_write 专用 continue · doc generation 规则 |
-| alpha.16 r32 | 2026-04-05 | I017 /diag 命令 · 上下文压缩跨提供商修复 |
-| alpha.15 r31 | 2026-04-05 | I015 Static/Dynamic 渲染分离 · I016 Timer 抑制 · MAX_ITERATIONS 50→200 |
-| v0.9.0 r30 | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
-| v0.8.0 r20 | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
-| v0.6.0 | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+| alpha.24 r36c | 2026-04-08 | BUG FIX: CI #32–34 失败 — 新建文件未 git add 导致 import 断裂 |
+| alpha.24 r36b | 2026-04-08 | BUG FIX: git_commit `--cached` 无效语法 + 系统测试 8 项全通过 |
+| alpha.24 r36  | 2026-04-08 | I024 spawn_research · I025 git_commit · I026 CHECKPOINT · I027 Hooks |
+| alpha.23 r35  | 2026-04-08 | I022 web_search · I021 Plan Mode · I023 Skills 框架 |
+| alpha.22 r34  | 2026-04-07 | I019 /init · I020 工业交付工作流 · Windows/CDN 知识注入 |
+| alpha.20 r33  | 2026-04-06 | I018 渲染自监控 · max_tokens file_write 专用 continue · doc generation 规则 |
+| alpha.16 r32  | 2026-04-05 | I017 /diag 命令 · 上下文压缩跨提供商修复 |
+| alpha.15 r31  | 2026-04-05 | I015 Static/Dynamic 渲染分离 · I016 Timer 抑制 · MAX_ITERATIONS 50→200 |
+| v0.9.0 r30    | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
+| v0.8.0 r20    | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
+| v0.6.0        | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+
+---
+
+## 2026-04-08 · v0.9.1-r36c (CI 修复)
+
+### [CI] GitHub Actions #32–#34 连续失败 — 新建文件漏 git add
+
+**现象**：推送 `09b8a8b`（I024–I027 主提交）后，CI `typecheck` 步骤立即报错：
+
+```
+error TS2307: Cannot find module '../../agent/research-loop.js'
+error TS2307: Cannot find module '../hooks/runner.js'
+error TS2307: Cannot find module './git-commit.js'
+```
+
+**根因分析**：
+
+| 提交 | 推送内容 | 缺失文件 | CI 结果 |
+|------|---------|---------|--------|
+| `09b8a8b` | registry.ts + useAgentLoop.ts（含 import） | `research-loop.ts` `hooks/runner.ts` `git-commit.ts` | ❌ #32 |
+| `34f4c4e` | OPERATIONS.md 文档 | 同上 | ❌ #33 |
+| `8b1ca5f` | 补上 `git-commit.ts` | `research-loop.ts` `hooks/runner.ts` | ❌ #34 |
+| `16d33a5` | 补上 `research-loop.ts` `hooks/runner.ts` | — | ✅ #35 |
+
+**原因**：三个新建源文件（非 `git add -u` 可追踪）在 `git add -u` 时被跳过，因为它们是全新的 untracked 文件，必须显式 `git add <path>` 才能纳入版本控制。
+
+**修复**：在 `16d33a5`（README 文档提交）中补 `git add src/agent/research-loop.ts src/hooks/runner.ts`，CI 恢复绿色。
+
+**经验教训（防止复发）**：
+- 新建文件后务必用 `git status` 检查 untracked 列表
+- 提交前执行 `git status --short` 确认所有新文件已 staged（`A` 状态而非 `??`）
+- 本地 `npx tsc --noEmit` 通过 ≠ CI 通过：本地有工作目录，CI 只有 git 追踪文件
+
+**验证**：本地 `npx tsc --noEmit` + `npm run test:run` 14/14 通过，CI badge 已恢复。
 
 ---
 
@@ -2176,4 +2211,4 @@ buildDiff() → tool_result { toolName, content: diffStr }
 
 ---
 
-*最后更新：2026-04-08 · v0.9.1-alpha.24 · 下次更新节点：I028 完成后*
+*最后更新：2026-04-08 · v0.9.1-alpha.24 (r36c) · 下次更新节点：I028 完成后*
