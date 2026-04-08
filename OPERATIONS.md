@@ -2,6 +2,23 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
+**最后更新：2026-04-08 · v0.9.1-alpha.24 · 下次更新节点：I028 完成后**
+
+## 版本快速索引
+
+| 版本节点 | 日期 | 内容 |
+|---------|------|------|
+| alpha.24 r36b | 2026-04-08 | BUG FIX: git_commit --cached 无效语法 |
+| alpha.24 r36 | 2026-04-08 | I024 spawn_research · I025 git_commit · I026 CHECKPOINT · I027 Hooks |
+| alpha.23 r35 | 2026-04-08 | I022 web_search · I021 Plan Mode · I023 Skills 框架 |
+| alpha.22 r34 | 2026-04-07 | I019 /init · I020 工业交付工作流 · Windows/CDN 知识注入 |
+| alpha.20 r33 | 2026-04-06 | I018 渲染自监控 · max_tokens file_write 专用 continue · doc generation 规则 |
+| alpha.16 r32 | 2026-04-05 | I017 /diag 命令 · 上下文压缩跨提供商修复 |
+| alpha.15 r31 | 2026-04-05 | I015 Static/Dynamic 渲染分离 · I016 Timer 抑制 · MAX_ITERATIONS 50→200 |
+| v0.9.0 r30 | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
+| v0.8.0 r20 | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
+| v0.6.0 | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+
 ---
 
 ## 2026-04-08 · v0.9.1-r36b (alpha.24 bugfix)
@@ -2159,4 +2176,4 @@ buildDiff() → tool_result { toolName, content: diffStr }
 
 ---
 
-*最后更新：2026-04-04 · v0.9.1 · 下次更新节点：I014 完成后*
+*最后更新：2026-04-08 · v0.9.1-alpha.24 · 下次更新节点：I028 完成后*
