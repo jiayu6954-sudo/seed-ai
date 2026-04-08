@@ -26,6 +26,11 @@ try {
 async function main(): Promise<void> {
   await ensureConfigDir();
 
+  // I023: initialise default skill files on first run (non-blocking)
+  import("./skills/loader.js").then(({ initDefaultSkills }) => {
+    try { initDefaultSkills(); } catch { /* non-fatal */ }
+  }).catch(() => {});
+
   // I016: run storage guard on every startup (non-blocking, errors swallowed)
   import("./storage/guard.js").then(({ runStorageGuard }) => {
     void runStorageGuard();

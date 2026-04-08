@@ -214,11 +214,10 @@ export function useAgentLoop({
         appendMessage({ id: randomUUID(), role: "system", content: [{ type: "text", text: slashResult.text }], timestamp: new Date() });
         return;
       }
-      // type === "passthrough" → fall through to LLM
-
-      // I010: Natural-language token budget override
-      // e.g. "+500k", "spend 2M tokens" → sets a per-message hardLimit
-      let effectiveInput = userInput;
+      // I021: /plan rewrites the user input with planning instructions before sending to LLM
+      // The UI still shows the original user input; the LLM receives the enriched planning prompt.
+      // type === "passthrough" → fall through unchanged
+      let effectiveInput = slashResult.type === "rewrite" ? slashResult.input : userInput;
       let dynamicHardLimit: number | undefined;
       const parsedBudget = parseTokenBudget(userInput);
       if (parsedBudget !== null) {
@@ -306,13 +305,19 @@ export function useAgentLoop({
         }
       }
 
-      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox);
+      const searchConfig = {
+        tavilyApiKey:  settings.search?.tavilyApiKey,
+        braveApiKey:   settings.search?.braveApiKey,
+        serperApiKey:  settings.search?.serperApiKey,
+        defaultProvider: settings.search?.defaultProvider,
+      };
+      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox, searchConfig);
       const permissions = new PermissionManager(settings, promptUser, !!activeSandbox);
 
       // Innovation 3: inject summary context from prior compressions
       const claudeMd = await loadClaudeMd(cwd, settings.context.claudeMdPaths);
       const summaryContext = contextManagerRef.current.getSummaryContext();
-      const systemPrompt = await buildSystemPrompt(cwd, claudeMd, settings, summaryContext);
+      const systemPrompt = await buildSystemPrompt(cwd, claudeMd, settings, summaryContext, effectiveInput);
 
       abortControllerRef.current = new AbortController();
       setCurrentActivity("");

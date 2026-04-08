@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import type { DevAISettings } from "../types/config.js";
 import { loadLongTermMemory, formatMemoryForPrompt } from "../memory/long-term.js";
 import { buildMemorySection } from "../memory/semantic-retrieval.js";
+import { loadSkills, matchSkills, formatSkillsForPrompt } from "../skills/loader.js";
 import { logger } from "../utils/logger.js";
 
 // ── Static sections (same every session — LLM learns them once) ────────────
@@ -76,10 +77,15 @@ function getToolSection(): string {
    - To find files: use glob (not find/ls)
    - To search content: use grep (not grep/rg via bash)
    - Reserve bash exclusively for: running tests, builds, git commands, npm/pip installs, and operations with no dedicated tool.
- - web_fetch uses a browser User-Agent and follows redirects. If a site returns 403/429, use bash with curl.exe (Windows) or curl (Linux sandbox) instead — curl lets you pass custom cookies/headers.
- - For Chinese financial sites (Sina, Eastmoney, etc.) that require Referer: web_fetch automatically sets it from the URL's origin, so try web_fetch first.
+ - **web_search** is your primary research tool. Use it whenever you need to find information without a known URL — documentation, technology comparisons, error messages, news, pricing, API references.
+   - Workflow: web_search → pick top URLs → web_fetch specific pages for full content → synthesise
+   - No API key needed (DuckDuckGo fallback always works). Tavily/Brave/Serper give higher quality if keys are configured.
+   - ALWAYS prefer web_search over guessing or fabricating URLs.
+ - web_fetch fetches a specific URL. Use it AFTER web_search identifies the right URL, or when you already know the exact URL.
+   - Uses browser User-Agent and follows redirects. If 403/429, fall back to bash+curl.exe with custom headers.
+   - For Chinese financial sites (Sina, Eastmoney) that require Referer: web_fetch auto-sets it from the URL's origin.
  - You can call multiple tools in a single response. If tools are independent, make all calls in parallel. Only call sequentially when a later call depends on an earlier result.
- - For simple, directed searches (specific file/class/function) use glob or grep directly. For deep codebase exploration requiring many queries, explain your plan first.
+ - For codebase searches (specific file/class/function) use glob or grep directly. For open-ended research, use web_search.
 
 # Tone and style
  - Only use emojis if the user explicitly requests it.
@@ -246,7 +252,11 @@ function getSlashCommandsHint(): string {
  - /cost     — show token usage and estimated cost for this session
  - /help     — show available commands and keybindings
  - /model    — show current model and provider
- - /memory   — show loaded long-term memory entries`;
+ - /memory   — show loaded long-term memory entries
+ - /diag     — show recent WARN/ERROR lines from debug log
+ - /init     — scaffold CLAUDE.md project context file
+ - /plan     — generate a structured execution plan before coding (I021)
+ - /skill    — list loaded skill workflow definitions (I023)`;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -323,6 +333,16 @@ export async function buildSystemPrompt(
   // Project-specific context from CLAUDE.md
   if (claudeMdContent) {
     dynamicParts.push(`## Project Context (from CLAUDE.md)\n\n${claudeMdContent}`);
+  }
+
+  // I023: Skills — load user-defined workflow protocols and inject matching ones
+  try {
+    const allSkills = loadSkills();
+    const active = userMessage ? matchSkills(allSkills, userMessage) : allSkills;
+    const skillsSection = formatSkillsForPrompt(active);
+    if (skillsSection) dynamicParts.push(skillsSection);
+  } catch (err) {
+    logger.warn("system_prompt.skills_load_failed", err);
   }
 
   // Slash commands hint

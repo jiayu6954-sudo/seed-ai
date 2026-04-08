@@ -17,13 +17,14 @@ import type { ToolName, ToolResult } from "../types/tools.js";
 import { logger } from "../utils/logger.js";
 
 // 只读工具 — 安全可缓存
-const CACHEABLE_TOOLS = new Set<ToolName>(["file_read", "glob", "grep", "web_fetch"]);
+const CACHEABLE_TOOLS = new Set<ToolName>(["file_read", "glob", "grep", "web_fetch", "web_search"]);
 
 // 写工具 — 触发缓存失效
 const WRITE_TOOLS = new Set<ToolName>(["file_write", "file_edit"]);
 
-// web_fetch TTL（毫秒）
-const WEB_FETCH_TTL_MS = 5 * 60 * 1000; // 5分钟
+// web_fetch / web_search TTL（毫秒）
+const WEB_FETCH_TTL_MS  = 5 * 60 * 1000; // 5分钟
+const WEB_SEARCH_TTL_MS = 3 * 60 * 1000; // 3分钟（搜索结果变化更快）
 
 interface CacheEntry {
   result: ToolResult;
@@ -74,7 +75,10 @@ export class ToolCache {
     if (result.isError) return; // 不缓存错误结果
 
     const key = this.makeKey(toolName, input);
-    const ttl = toolName === "web_fetch" ? WEB_FETCH_TTL_MS : undefined;
+    const ttl =
+      toolName === "web_fetch"  ? WEB_FETCH_TTL_MS  :
+      toolName === "web_search" ? WEB_SEARCH_TTL_MS :
+      undefined;
 
     this.store.set(key, {
       result,

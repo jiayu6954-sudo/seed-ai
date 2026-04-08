@@ -15,7 +15,8 @@ export type ToolName =
   | "file_edit"
   | "glob"
   | "grep"
-  | "web_fetch";
+  | "web_fetch"
+  | "web_search";
 
 export interface ToolExecutionContext {
   cwd: string;
@@ -78,6 +79,12 @@ export interface WebFetchInput {
   headers?: Record<string, string>;
 }
 
+export interface WebSearchInput {
+  query: string;
+  provider?: "auto" | "tavily" | "brave" | "serper" | "duckduckgo";
+  maxResults?: number;
+}
+
 export type ToolInput =
   | BashInput
   | FileReadInput
@@ -85,4 +92,5 @@ export type ToolInput =
   | FileEditInput
   | GlobInput
   | GrepInput
-  | WebFetchInput;
+  | WebFetchInput
+  | WebSearchInput;

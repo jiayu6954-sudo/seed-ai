@@ -7,6 +7,7 @@ import { executeFileEdit } from "./file-edit.js";
 import { executeGlob } from "./glob.js";
 import { executeGrep } from "./grep.js";
 import { executeWebFetch } from "./web-fetch.js";
+import { executeWebSearch, type SearchConfig } from "./web-search.js";
 import { ToolCache } from "./cache.js";
 import { MCPRegistry } from "../mcp/registry.js";
 import { SandboxManager } from "../sandbox/manager.js";
@@ -21,6 +22,7 @@ import type {
   GlobInput,
   GrepInput,
   WebFetchInput,
+  WebSearchInput,
 } from "../types/tools.js";
 import { z } from "zod";
 import { logger } from "../utils/logger.js";
@@ -37,6 +39,11 @@ const WebFetchSchema = z.object({
   maxBytes: z.number().optional(),
   referer: z.string().optional(),
   headers: z.record(z.string()).optional(),
+});
+const WebSearchSchema = z.object({
+  query: z.string(),
+  provider: z.enum(["auto", "tavily", "brave", "serper", "duckduckgo"]).optional(),
+  maxResults: z.number().optional(),
 });
 
 /** I009-F: Claude Code's DEFAULT_MAX_RESULT_SIZE_CHARS — hard cap per tool result */
@@ -62,13 +69,15 @@ export class ToolRegistry {
   private cwd: string;
   private mcpRegistry: MCPRegistry | null = null;
   private sandbox: SandboxManager | null = null;
+  private searchConfig: SearchConfig;
   // Innovation 2: per-session tool result cache
   readonly cache = new ToolCache();
 
-  constructor(cwd: string, mcpRegistry?: MCPRegistry, sandbox?: SandboxManager) {
+  constructor(cwd: string, mcpRegistry?: MCPRegistry, sandbox?: SandboxManager, searchConfig?: SearchConfig) {
     this.cwd = cwd;
     this.mcpRegistry = mcpRegistry ?? null;
     this.sandbox = sandbox ?? null;
+    this.searchConfig = searchConfig ?? {};
   }
 
   /** Returns tool definitions in provider-neutral format (native + MCP) */
@@ -186,6 +195,11 @@ export class ToolRegistry {
         case "web_fetch": {
           const input = WebFetchSchema.parse(rawInput) as WebFetchInput;
           result = await executeWebFetch(input, ctx);
+          break;
+        }
+        case "web_search": {
+          const input = WebSearchSchema.parse(rawInput) as WebSearchInput;
+          result = await executeWebSearch(input, ctx, this.searchConfig);
           break;
         }
         default:

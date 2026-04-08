@@ -85,6 +85,7 @@ export function applyCliOverrides(
       glob: "auto",
       grep: "auto",
       web_fetch: "auto",
+      web_search: "auto",
     };
   }
   if (opts.denyAll) {
@@ -96,6 +97,7 @@ export function applyCliOverrides(
       glob: "auto",
       grep: "auto",
       web_fetch: "deny",
+      web_search: "auto",
     };
   }
 

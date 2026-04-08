@@ -20,6 +20,7 @@ import path from "node:path";
 import os from "node:os";
 import type { TokenUsage } from "../types/agent.js";
 import { writeClaudeMd } from "../memory/claude-md.js";
+import { loadSkills } from "../skills/loader.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,9 +46,10 @@ export interface SlashContext {
 }
 
 export type SlashResult =
-  | { type: "message"; text: string }        // display as system message
+  | { type: "message"; text: string }         // display as system message
   | { type: "clear" }                         // handled by clearHistory()
   | { type: "compact" }                       // trigger compaction
+  | { type: "rewrite"; input: string }        // replace user input before sending to LLM (I021)
   | { type: "passthrough" };                  // not a command — send to LLM
 
 // ── Registry ──────────────────────────────────────────────────────────────
@@ -286,6 +288,92 @@ const COMMANDS: CommandDef[] = [
       }
     },
   },
+  // ── I021: Plan Mode ─────────────────────────────────────────────────────
+  {
+    name: "plan",
+    description: "Generate a structured execution plan before coding — review before any files are touched",
+    handler: (args, _ctx) => {
+      const task = args.trim();
+
+      // Build a planning-focused prompt that instructs the AI to reason first,
+      // produce a numbered plan, and explicitly NOT use any tools yet.
+      const planningPrefix = [
+        "**[PLAN MODE]** Before writing any code or using any tools, produce a detailed execution plan for the following task.",
+        "",
+        "Your plan must include:",
+        "1. A brief restatement of the goal (1-2 sentences)",
+        "2. Numbered phases with concrete steps (what files to read, create, or modify)",
+        "3. Key technical decisions and tradeoffs",
+        "4. Expected outcomes and verification steps",
+        "",
+        "Format as a numbered Markdown list. DO NOT use any tools yet.",
+        "After presenting the plan, ask: '**Proceed with this plan? (reply yes / adjust X / stop)**'",
+        "",
+        task ? `Task: ${task}` : "(The user will describe the task in their next message — ask them to describe it now.)",
+      ].join("\n");
+
+      if (!task) {
+        // No task given — display instructions and let user describe it
+        return {
+          type: "message",
+          text: [
+            "── Plan Mode ──────────────────────────────",
+            "  Describe the task you want to plan:",
+            "  /plan <task description>",
+            "",
+            "  Example: /plan build a REST API for user management with JWT auth",
+            "──────────────────────────────────────────",
+          ].join("\n"),
+        };
+      }
+
+      // Rewrite the input so the LLM sees the planning instructions,
+      // but the user still sees their original task in the UI.
+      return { type: "rewrite", input: planningPrefix };
+    },
+  },
+
+  // ── I023: Skill list ─────────────────────────────────────────────────────
+  {
+    name: "skill",
+    description: "List loaded skill workflow definitions from ~/.seed/skills/",
+    handler: (_args, _ctx) => {
+      const skills = loadSkills();
+
+      if (skills.length === 0) {
+        return {
+          type: "message",
+          text: [
+            "── Skills ─────────────────────────────────",
+            "  No skills loaded.",
+            "",
+            "  Create skill files in ~/.seed/skills/*.md",
+            "  Each file defines a reusable task workflow.",
+            "  Run /init to scaffold default skills.",
+            "───────────────────────────────────────────",
+          ].join("\n"),
+        };
+      }
+
+      const lines = skills.map((s, i) => {
+        const triggers = s.triggers.length > 0 ? `  triggers: ${s.triggers.join(", ")}` : "  (global — always active)";
+        return `  ${i + 1}. ${s.name}\n${triggers}`;
+      });
+
+      return {
+        type: "message",
+        text: [
+          `── Loaded Skills (${skills.length}) ──────────────────`,
+          ...lines,
+          "",
+          "  Skills are auto-injected into the system prompt.",
+          "  Edit files in ~/.seed/skills/ to customise.",
+          "───────────────────────────────────────────",
+        ].join("\n"),
+      };
+    },
+  },
+
   {
     name: "status",
     description: "Show current session statistics overview",

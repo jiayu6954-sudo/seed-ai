@@ -169,4 +169,39 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ["url"],
     },
   },
+  {
+    name: "web_search",
+    description:
+      "Search the web for information and return a list of relevant results (title, URL, snippet). " +
+      "Use this when you need to find information but don't have a specific URL — for research, " +
+      "technology comparisons, documentation lookup, news, pricing, or any open-ended queries.\n\n" +
+      "PROVIDER AUTO-SELECTION:\n" +
+      "- Uses the best available provider based on configured API keys (Tavily > Brave > Serper > DuckDuckGo)\n" +
+      "- DuckDuckGo works without any API key (free fallback)\n" +
+      "- Tavily/Brave/Serper return higher-quality results — configure keys in ~/.seed/settings.json\n\n" +
+      "WORKFLOW:\n" +
+      "- Search first to discover URLs, then use web_fetch on specific URLs for full content\n" +
+      "- For research tasks: search → pick top results → fetch each → synthesise\n" +
+      "- Prefer web_search over guessing URLs for documentation sites",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query (natural language or keywords)",
+        },
+        provider: {
+          type: "string",
+          enum: ["auto", "tavily", "brave", "serper", "duckduckgo"],
+          description:
+            "Search provider to use. 'auto' selects based on available API keys. Default: auto",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of results to return (default: 8, max: 20)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];

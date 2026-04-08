@@ -30,6 +30,7 @@ export const SettingsSchema = z.object({
       glob: PermissionLevelSchema.default("auto"),
       grep: PermissionLevelSchema.default("auto"),
       web_fetch: PermissionLevelSchema.default("ask"),
+      web_search: PermissionLevelSchema.default("auto"),
     })
     .default({}),
 
@@ -37,7 +38,7 @@ export const SettingsSchema = z.object({
     .array(
       z.object({
         tool: z.union([
-          z.enum(["bash", "file_read", "file_write", "file_edit", "glob", "grep", "web_fetch"]),
+          z.enum(["bash", "file_read", "file_write", "file_edit", "glob", "grep", "web_fetch", "web_search"]),
           z.literal("*"),
         ]),
         level: PermissionLevelSchema,
@@ -131,6 +132,22 @@ export const SettingsSchema = z.object({
       maxMemoryMb: z.number().int().min(64).max(4096).default(512),
       /** Allow outbound network access from container */
       allowNetwork: z.boolean().default(true),
+    })
+    .default({}),
+
+  // ── Web search (I022) ────────────────────────────────────────────────────
+  search: z
+    .object({
+      /** Preferred provider when multiple keys are configured */
+      defaultProvider: z
+        .enum(["auto", "tavily", "brave", "serper", "duckduckgo"])
+        .default("auto"),
+      /** Tavily API key — https://tavily.com (best quality, AI-optimised) */
+      tavilyApiKey: z.string().optional(),
+      /** Brave Search API key — https://brave.com/search/api */
+      braveApiKey: z.string().optional(),
+      /** Serper API key — https://serper.dev (Google results, 2500 free/mo) */
+      serperApiKey: z.string().optional(),
     })
     .default({}),
 
