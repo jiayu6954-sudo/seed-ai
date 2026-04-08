@@ -359,22 +359,6 @@ Memory Layer
 ### Where Seed AI adds capability Claude Code does not address
 
 | Dimension | Seed AI | Claude Code |
-|-----------|-------|-------------|
-| **Providers** | 8+ (Anthropic, OpenAI, DeepSeek, Groq, Gemini, Ollama, OpenRouter, Moonshot) | Anthropic only |
-| **Local LLMs** | Auto-discover, tool-cap probe, XML fallback | None |
-| **Long-term memory** | 3-layer, Haiku extraction, semantic vector search | None |
-| **Tool result cache** | Session-level, write-before-invalidate | None |
-| **web_fetch fallback** | native → curl auto-downgrade, charset-aware | None |
-| **Context compression** | LLM-powered semantic summary at 80% window | Conversation compaction via `/compact` (different approach) |
-| **Token budget** | Natural language: `"+500k"`, `"2M tokens"` | Static config only |
-| **Docker sandbox** | 3 isolation levels + graceful host fallback | None |
-| **Storage quotas** | Auto-enforced + SEED_DATA_DIR relocation | None |
-| **Model switching** | Interactive menu + single-command flags | None |
-| **MCP** | **Client** + registry + lifecycle management | **Server** only |
-
-### Seed AI leads (updated alpha.24)
-
-| Dimension | Seed AI | Claude Code |
 |-----------|---------|-------------|
 | **Providers** | 8+ (Anthropic, OpenAI, DeepSeek, Groq, Gemini, Ollama, OpenRouter, Moonshot) | Anthropic only |
 | **Local LLMs** | Auto-discover, tool-cap probe, XML fallback | None |

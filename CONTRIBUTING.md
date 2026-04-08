@@ -25,7 +25,7 @@ All dependencies used by Seed AI are MIT or Apache 2.0 licensed — there are no
 ## Development Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/seed-ai.git
+git clone https://github.com/jiayu6954-sudo/seed-ai.git
 cd seed-ai
 npm install
 npm run build       # tsup — builds in <2s
@@ -41,7 +41,7 @@ npm link            # install `seed` globally for manual testing
 
 | Area | Priority | Notes |
 |------|----------|-------|
-| Integration tests (agent loop end-to-end) | High | Biggest quality gap — live API calls welcome |
+| Integration tests (streaming, hook errors, provider adapters) | High | 4 core scenarios covered; edge cases need expansion |
 | Windows-specific edge cases | High | Path handling, terminal encoding, Docker Desktop |
 | Local LLM provider testing | Medium | Ollama model quirks, LM Studio, vLLM |
 | Bug reports with reproduction steps | Always welcome | Open a GitHub Issue |
@@ -50,9 +50,9 @@ npm link            # install `seed` globally for manual testing
 
 ## Innovation Numbering
 
-Innovations are numbered **I001–I016** (I001–I013 + I016 delivered; I014 dropped; I015 next).
+Innovations are numbered **I001–I027** (all delivered; I014 dropped; I015/I016 are UI/storage). **27 total shipped.**
 
-- New innovations that extend the system should claim the next available number (I017+)
+- New innovations that extend the system should claim the next available number (I028+)
 - Bug fixes and UI improvements do **not** consume an innovation number
 - Document new innovations in `WHITEPAPER.md` Section 4, and record the operation in `OPERATIONS.md`
 

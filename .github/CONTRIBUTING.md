@@ -126,10 +126,9 @@ Only comment logic that isn't self-evident. Innovation numbers (`// I001`, `// I
 
 | Range | Meaning |
 |-------|---------|
-| I001–I013, I016 | Delivered (14 innovations) |
+| I001–I013, I016–I027 | Delivered (27 innovations) — see WHITEPAPER.md §4 for full list |
 | I014 | Evaluated and permanently dropped — I012 resolved the root cause |
-| I015 | Next priority: Hooks system (PreToolUse / PostToolUse, sandboxed) |
-| I017+ | Your proposed innovation — discuss in issue first |
+| I028+ | Your proposed innovation — open a Discussion first |
 
 UI fixes and bug fixes do not consume innovation numbers.
 
