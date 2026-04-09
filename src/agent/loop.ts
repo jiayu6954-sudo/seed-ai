@@ -44,6 +44,9 @@ export async function runAgentLoop(
 
   let iterations = 0;
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  // P016: guard against infinite retry on unavailable tools (e.g. web_search blocked by GFW)
+  let consecutiveToolErrors = 0;
+  const CONSECUTIVE_ERROR_LIMIT = 5;
 
   while (iterations < maxIterations) {
     iterations++;
@@ -236,6 +239,26 @@ export async function runAgentLoop(
         messages.push({ role: "user", content: toolResults });
         options.onEvent({ type: "done", stopReason: "denied" });
         return { finalMessage: message, updatedHistory: messages, totalUsage };
+      }
+
+      // P016: detect consecutive all-error tool rounds (e.g. web_search blocked by GFW)
+      const allErrors = toolResults.every(
+        (r): r is Extract<typeof r, { is_error?: boolean }> =>
+          "is_error" in r && r.is_error === true
+      );
+      if (allErrors) {
+        consecutiveToolErrors++;
+        if (consecutiveToolErrors >= CONSECUTIVE_ERROR_LIMIT) {
+          const err = new Error(
+            `Agent loop aborted: ${consecutiveToolErrors} consecutive tool-error rounds. ` +
+            `This usually means a required service (e.g. web_search) is unavailable. ` +
+            `Check your API keys or network connectivity.`
+          );
+          options.onEvent({ type: "error", error: err });
+          throw err;
+        }
+      } else {
+        consecutiveToolErrors = 0;
       }
 
       messages.push({ role: "user", content: toolResults });
