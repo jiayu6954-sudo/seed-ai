@@ -2,12 +2,14 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-09 · v0.9.1-alpha.24 (r40) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
+**最后更新：2026-04-09 · v0.9.2-alpha.25 (r42) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.25 r42  | 2026-04-09 | FEAT: Mozilla Readability 内容提取 + 科研/金融数据源注入系统提示 |
+| alpha.25 r41  | 2026-04-09 | BUG FIX: P016 — 连续工具错误无限循环（web_search GFW 阻断触发 200 次迭代）|
 | alpha.24 r40  | 2026-04-09 | DOCS: 白皮书 10 处测试数据同步（14→18，零测试→基础覆盖，评分 2/5→2.5/5）|
 | alpha.24 r39  | 2026-04-09 | DOCS: GitHub 诚实度修复 — 重复表格、过时创新编号、PR模板、评估报告更新 |
 | alpha.24 r38  | 2026-04-08 | TEST: 首批 Agent Loop 集成测试 (4 场景) + 叙事基调修正 + 项目定位声明 |
@@ -23,6 +25,186 @@
 | v0.9.0 r30    | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
 | v0.8.0 r20    | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
 | v0.6.0        | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+
+---
+
+## 2026-04-09 · v0.9.2-r42 (Mozilla Readability 内容提取 + 科研数据源)
+
+### [FEAT] web_fetch 集成 Mozilla Readability — 内容清洗升级
+
+**触发背景**：用户手动测试发现 `web_fetch` 无法有效处理含广告、导航栏、页脚的真实网页。原始 `stripHtml()` 只做正则删标签，完全不识别"主体内容"。
+
+**问题根因**：
+```typescript
+// 旧实现 — 14 行正则，无语义理解
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")   // 把所有 HTML 标签直接拍平
+    ...
+}
+// 结果：广告/导航/页脚全保留，表格结构全丢失
+```
+
+**解决方案：接入 Mozilla Readability（Firefox 阅读模式同款算法）**
+
+**安装步骤**：
+```bash
+npm install @mozilla/readability jsdom
+npm install --save-dev @types/jsdom @types/mozilla__readability
+```
+
+**核心改动** (`src/tools/web-fetch.ts`)：
+
+1. **新增 `extractHtml()` 函数** — 替换原 `stripHtml()` 调用路径：
+```typescript
+function extractHtml(html: string, url: string): { text: string; note: string } {
+  const dom = new JSDOM(html, { url });
+  const reader = new Readability(dom.window.document, { charThreshold: 20 });
+  const article = reader.parse();
+  if (article && article.textContent?.trim().length > 200) {
+    return { text: domToText(doc.body), note: `[Readability: extracted "${article.title}"]` };
+  }
+  return { text: stripHtml(html), note: "[Readability: fallback mode]" }; // 降级
+}
+```
+
+2. **新增 `domToText()` 函数** — 保留文档结构：
+   - `h1–h6` → `# ## ###` 标题
+   - `p` → 独立段落
+   - `li` → `- 列表项`（支持多级缩进）
+   - `pre/code` → ` ``` 代码块 ``` `
+   - `table` → 调用 `tableToText()` 输出对齐表格
+   - `script/style/noscript/iframe` → 跳过
+
+3. **新增 `tableToText()` 函数** — 将 HTML 表格渲染为 markdown 对齐格式：
+```
+| Gene   | Chromosome | Length   |
+| ------ | ---------- | -------- |
+| BRCA1  | 17q21      | 81,189bp |
+```
+
+4. **`buildResult()` 改造**：`stripHtml(raw)` → `extractHtml(raw, url)`，结果附带提取说明
+
+**真实测试结果**（`node --input-type=module` 直接验证）：
+
+| 页面 | 原始 HTML | 清洗后 | 噪声剥离率 |
+|------|----------|--------|-----------|
+| PubMed 文章 | 113 KB | 1.4 KB | **99%** |
+| WHO Cancer | 121 KB | 12 KB | **90%** |
+| Wikipedia DNA | ~800 KB | 115 KB | 广告/导航全清除，正文完整 |
+
+**遇到的问题**：
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| TypeScript TS6133 "已声明但从未读取" | Readability/JSDOM import 加了但 `buildResult` 还未改 | 先改 import，同步改 buildResult |
+| 系统提示 URL 加反引号引起 TS 模板字符串解析错误 | URL 里的字符被当作 `\`${...}\`` 表达式 | 去掉反引号，直接写裸 URL |
+
+**验证**：typecheck 0 errors，18 tests passed，build 301 KB。  
+**提交**：`dc7db67`（已推送）
+
+---
+
+### [FEAT] 系统提示注入科研/金融数据源知识
+
+**触发背景**：用户需要抓取金融数据（股票、期货）和科研数据（疾病、DNA序列库）。  
+AI 不知道具体 API endpoint，需要在系统提示里注入 URL 模板。
+
+**改动** (`src/agent/system-prompt.ts`) — `web_fetch` 说明段落新增两个知识块：
+
+**科研/生物医学 API（8 个，全免费无需 Key）**：
+
+| 数据库 | API Endpoint 模板 | 数据格式 |
+|--------|-----------------|---------|
+| PubMed 摘要 | `eutils.ncbi.nlm.nih.gov/...?db=pubmed&id=PMID&rettype=abstract` | 纯文本 |
+| NCBI Gene | `eutils.ncbi.nlm.nih.gov/...?db=gene&id=GENE_ID&retmode=text` | 纯文本 |
+| NCBI 核苷酸 FASTA | `eutils.ncbi.nlm.nih.gov/...?db=nucleotide&id=ACC&rettype=fasta` | FASTA |
+| UniProt 蛋白质 | `rest.uniprot.org/uniprotkb/ACCESSION.fasta` | FASTA |
+| arXiv 论文 | `export.arxiv.org/abs/PAPER_ID` | HTML→Readability |
+| ClinicalTrials | `clinicaltrials.gov/api/query/full_studies?expr=QUERY&fmt=json` | JSON |
+| KEGG 通路 | `rest.kegg.jp/get/PATHWAY_ID` | 纯文本 |
+| Ensembl 基因组 | `rest.ensembl.org/sequence/id/ENSEMBL_ID?content-type=text/plain` | 裸序列 |
+
+**金融 API（2 个，中国大陆直连）**：
+- 新浪实时股价：`hq.sinajs.cn/list=TICKER`（需 curl + Referer，系统已自动处理）
+- 东方财富 K 线：`push2his.eastmoney.com/api/qt/stock/kline/get?secid=...`
+
+**真实数据抓取验证**：
+
+| 测试项 | 结果 | 数据样例 |
+|--------|------|---------|
+| NCBI BRCA1 mRNA FASTA | ✅ 7,281 bytes | `>NM_007294.4 Homo sapiens BRCA1...GCTGAGACTTCCTGGACGGG...` |
+| UniProt BRCA1 蛋白质 | ✅ 2,005 bytes | `>sp|P38398|BRCA1_HUMAN...MDLSALRVEEVQNVINAMQKILECPICLE...` |
+| Ensembl TP53 基因 | ✅ 25,768 bp | `GGATTGGGGTTTTCCCCTCCCATGTGCTCAAG...` |
+| Wikipedia DNA 词条 | ✅ 115,526 字符 | "Deoxyribonucleic acid (DNA) is a polymer..." |
+| WHO Cancer factsheet | ✅ 12 KB 干净文本 | "Cancer is a leading cause of death worldwide..." |
+| PubMed 论文摘要 | ✅ Readability 提取 | 标题/摘要/DOI/作者机构 |
+| 新浪茅台实时股价 | ✅ curl 降级成功 | 实时价格 1460.49, 成交量 207万股 |
+
+**提交**：`dc7db67`（与 Readability 合并提交，已推送）
+
+---
+
+## 2026-04-09 · v0.9.2-r41 (P016 — 连续工具错误无限循环修复)
+
+### [BUG FIX] P016: web_search GFW 阻断 → 触发 200 次迭代上限
+
+**现象**（日志截取）：
+```
+[ERROR] Agent loop exceeded 200 iterations.
+Error: Agent loop exceeded 200 iterations.
+    at runAgentLoop (file:///D:/claude/devai/dist/index.js:2665:15)
+```
+日志中两次出现，每次前有大量 `tool_running → streaming` 循环。
+
+**根本原因分析**：
+
+| 层次 | 原因 |
+|------|------|
+| 网络层 | `web_search` 无搜索 API Key → 降级 DuckDuckGo → `lite.duckduckgo.com` 被 GFW 拦截 → 返回 `isError: true` |
+| AI 行为 | AI 收到工具错误后换词重试，每轮都失败，不停循环 |
+| Loop 设计缺陷 | Loop 只有总迭代上限（200），无"连续错误"熔断机制 |
+
+**修复方案** (`src/agent/loop.ts`)：
+
+```typescript
+// 新增两个变量
+let consecutiveToolErrors = 0;
+const CONSECUTIVE_ERROR_LIMIT = 5;
+
+// 工具执行结果处理段新增熔断逻辑
+const allErrors = toolResults.every(
+  (r) => "is_error" in r && r.is_error === true
+);
+if (allErrors) {
+  consecutiveToolErrors++;
+  if (consecutiveToolErrors >= CONSECUTIVE_ERROR_LIMIT) {
+    const err = new Error(
+      `Agent loop aborted: ${consecutiveToolErrors} consecutive tool-error rounds. ` +
+      `This usually means a required service (e.g. web_search) is unavailable. ` +
+      `Check your API keys or network connectivity.`
+    );
+    options.onEvent({ type: "error", error: err });
+    throw err;
+  }
+} else {
+  consecutiveToolErrors = 0; // 有一轮成功则重置计数
+}
+```
+
+**效果**：原本跑满 200 轮（约 3 分钟卡死），现在第 5 轮连续失败即中止，提示根本原因。
+
+**验证**：typecheck 0 errors，18 tests passed。  
+**提交**：`04e35c4`（已推送）
+
+**补充说明 — 为什么 DeepSeek API Key ≠ 搜索能力**：
+
+> DeepSeek 是语言模型（AI的"大脑"），负责理解和生成文本。  
+> `web_search` 工具需要单独的搜索服务（Serper/Tavily/Brave）作为AI的"眼睛"。  
+> 两者完全独立，配置了 DeepSeek Key 不代表有联网搜索能力。  
+> 解决方法：在 `~/.seed/settings.json` 的 `search` 字段配置 `serperApiKey`（免费，中国可访问）。
 
 ---
 
@@ -2373,4 +2555,4 @@ buildDiff() → tool_result { toolName, content: diffStr }
 
 ---
 
-*最后更新：2026-04-09 · v0.9.1-alpha.24 (r40) · 下次更新节点：集成测试扩展（流式中断、Hooks 错误路径）*
+*最后更新：2026-04-09 · v0.9.2-alpha.25 (r42) · 下次更新节点：集成测试扩展（流式中断、Hooks 错误路径）*
