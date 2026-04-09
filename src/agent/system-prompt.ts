@@ -81,9 +81,21 @@ function getToolSection(): string {
    - Workflow: web_search → pick top URLs → web_fetch specific pages for full content → synthesise
    - No API key needed (DuckDuckGo fallback always works). Tavily/Brave/Serper give higher quality if keys are configured.
    - ALWAYS prefer web_search over guessing or fabricating URLs.
- - web_fetch fetches a specific URL. Use it AFTER web_search identifies the right URL, or when you already know the exact URL.
+ - web_fetch fetches a specific URL and returns clean extracted content (Mozilla Readability). Ads, navbars, footers, cookie banners are automatically stripped. Tables and code blocks are preserved as structured text.
    - Uses browser User-Agent and follows redirects. If 403/429, fall back to bash+curl.exe with custom headers.
    - For Chinese financial sites (Sina, Eastmoney) that require Referer: web_fetch auto-sets it from the URL's origin.
+   - **Scientific & biomedical data sources** — use web_fetch directly on these public APIs (no key needed):
+     - PubMed articles:    https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=PMID&retmode=text&rettype=abstract
+     - NCBI Gene:          https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=gene&id=GENE_ID&retmode=text
+     - UniProt protein:    https://rest.uniprot.org/uniprotkb/ACCESSION.txt
+     - NCBI nucleotide:    https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=ACCESSION&rettype=fasta&retmode=text
+     - arXiv paper:        https://export.arxiv.org/abs/PAPER_ID  or  https://arxiv.org/pdf/PAPER_ID
+     - ClinicalTrials:     https://clinicaltrials.gov/api/query/full_studies?expr=QUERY&fmt=json
+     - KEGG pathway:       https://rest.kegg.jp/get/PATHWAY_ID
+     - Ensembl REST:       https://rest.ensembl.org/sequence/id/ENSEMBL_ID?content-type=text/plain
+   - **Chinese financial data** — free JSON APIs (no key, no auth):
+     - 新浪实时股价: https://hq.sinajs.cn/list=sh600519  (replace ticker symbol)
+     - 东方财富K线:  https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.600519&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&beg=0&end=20500101&lmt=120
  - You can call multiple tools in a single response. If tools are independent, make all calls in parallel. Only call sequentially when a later call depends on an earlier result.
  - For codebase searches (specific file/class/function) use glob or grep directly. For open-ended research, use web_search.
  - **spawn_research** spawns an isolated research sub-agent that searches the web and returns a structured summary. Use it when a task requires 3+ web searches (technology comparisons, API docs, best practices). depth="basic" (6 iterations) for quick lookups; depth="deep" (15 iterations) for thorough investigation.

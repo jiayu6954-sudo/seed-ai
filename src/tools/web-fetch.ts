@@ -2,16 +2,18 @@
  * web_fetch — HTTP/HTTPS content retrieval tool.
  *
  * v0.8.0: curl fallback for sites that block Node.js fetch()
- *   - Browser-grade User-Agent to avoid bot-detection blocks
- *   - Realistic Accept / Accept-Language / Cache-Control headers
- *   - Origin-derived Referer (required by APIs like Sina Finance)
- *   - GBK/GB2312 charset detection for Chinese financial sites
- *   - Richer error diagnostics to guide the LLM on recovery strategies
- *   - curl.exe fallback when native fetch() fails (e.g. HTTP/2 ALPN issues)
+ * v0.9.2: Mozilla Readability integration (I028-pre)
+ *   - Replaces naive regex stripHtml with article-aware content extraction
+ *   - Strips ads, navbars, footers, cookie banners — keeps main content
+ *   - Preserves code blocks, tables, lists with structural markers
+ *   - Falls back to enhanced stripHtml for non-article pages (data tables, APIs)
+ *   - Optimised for scientific sources: PubMed, arXiv, NCBI, UniProt
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { Readability } from "@mozilla/readability";
+import { JSDOM } from "jsdom";
 import type { WebFetchInput, ToolResult, ToolExecutionContext } from "../types/tools.js";
 import { logger } from "../utils/logger.js";
 
@@ -244,12 +246,15 @@ function buildResult(
   note = "",
 ): ToolResult {
   let text: string;
+  let extractionNote = "";
 
   if (contentType.includes("application/json")) {
     try { text = JSON.stringify(JSON.parse(raw), null, 2); }
     catch { text = raw; }
   } else if (contentType.includes("text/html")) {
-    text = stripHtml(raw);
+    const extracted = extractHtml(raw, url);
+    text = extracted.text;
+    extractionNote = extracted.note;
   } else {
     text = raw;
   }
@@ -258,13 +263,159 @@ function buildResult(
     ? `\n\n[Content truncated at ${maxBytes} bytes — use maxBytes param to read more]`
     : "";
 
-  const noteStr = note ? `\n${note}` : "";
+  const noteStr = [note, extractionNote].filter(Boolean).join("\n");
+  const notePrefix = noteStr ? `\n${noteStr}` : "";
 
   return {
-    content: `URL: ${url}\nContent-Type: ${contentType}${noteStr}\n\n${text}${suffix}`,
+    content: `URL: ${url}\nContent-Type: ${contentType}${notePrefix}\n\n${text}${suffix}`,
     isError: false,
     metadata: { bytesRead: Math.min(raw.length, maxBytes), truncated },
   };
+}
+
+/**
+ * Extract readable content from HTML using Mozilla Readability.
+ * Falls back to enhanced stripHtml for pages Readability can't parse
+ * (e.g. data tables, search result listings, API documentation pages).
+ */
+function extractHtml(html: string, url: string): { text: string; note: string } {
+  try {
+    const dom = new JSDOM(html, { url });
+    const reader = new Readability(dom.window.document, {
+      // Keep more content for scientific pages that have dense structured data
+      charThreshold: 20,
+      // Preserve classes so table/code structure is retained
+      keepClasses: false,
+    });
+    const article = reader.parse();
+
+    if (article && article.textContent && article.textContent.trim().length > 200) {
+      // Convert the parsed article DOM back to structured plain text
+      const articleDom = new JSDOM(article.content ?? "");
+      const doc = articleDom.window.document;
+      const structured = domToText(doc.body);
+
+      const title = article.title ? `# ${article.title}\n\n` : "";
+      const byline = article.byline ? `Author: ${article.byline}\n\n` : "";
+      const excerpt = article.excerpt
+        ? `Summary: ${article.excerpt}\n\n---\n\n`
+        : "---\n\n";
+
+      return {
+        text: `${title}${byline}${excerpt}${structured}`.trim(),
+        note: `[Readability: extracted "${article.title ?? "article"}" — ads/nav/footer removed]`,
+      };
+    }
+  } catch (err) {
+    logger.debug("web_fetch.readability_failed", { url, err: String(err) });
+  }
+
+  // Fallback: enhanced regex stripper
+  return { text: stripHtml(html), note: "[Readability: fallback mode — page not article-structured]" };
+}
+
+/**
+ * Walk a DOM node tree and emit structured plain text.
+ * Preserves headings, lists, tables, code blocks — important for scientific data.
+ */
+function domToText(node: Element | null): string {
+  if (!node) return "";
+
+  const lines: string[] = [];
+
+  function walk(el: Element | ChildNode, depth = 0): void {
+    if (el.nodeType === 3 /* TEXT_NODE */) {
+      const t = (el as Text).textContent?.trim() ?? "";
+      if (t) lines.push(t);
+      return;
+    }
+    if (el.nodeType !== 1 /* ELEMENT_NODE */) return;
+
+    const tag = (el as Element).tagName?.toLowerCase() ?? "";
+
+    switch (tag) {
+      case "h1": lines.push(`\n# ${(el as Element).textContent?.trim()}\n`); return;
+      case "h2": lines.push(`\n## ${(el as Element).textContent?.trim()}\n`); return;
+      case "h3": lines.push(`\n### ${(el as Element).textContent?.trim()}\n`); return;
+      case "h4":
+      case "h5":
+      case "h6": lines.push(`\n#### ${(el as Element).textContent?.trim()}\n`); return;
+
+      case "p": {
+        const t = (el as Element).textContent?.trim();
+        if (t) lines.push(`\n${t}\n`);
+        return;
+      }
+
+      case "li": {
+        const t = (el as Element).textContent?.trim();
+        if (t) lines.push(`${"  ".repeat(depth)}- ${t}`);
+        return;
+      }
+
+      case "ul":
+      case "ol":
+        lines.push("");
+        for (const child of Array.from(el.childNodes)) walk(child, depth + 1);
+        lines.push("");
+        return;
+
+      case "pre":
+      case "code": {
+        const t = (el as Element).textContent?.trim();
+        if (t) lines.push(`\`\`\`\n${t}\n\`\`\``);
+        return;
+      }
+
+      case "table": {
+        lines.push("\n");
+        lines.push(tableToText(el as Element));
+        lines.push("\n");
+        return;
+      }
+
+      case "br": lines.push(""); return;
+      case "hr": lines.push("\n---\n"); return;
+
+      case "script":
+      case "style":
+      case "noscript":
+      case "iframe":
+        return; // skip
+
+      default:
+        for (const child of Array.from(el.childNodes)) walk(child, depth);
+    }
+  }
+
+  walk(node);
+  return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
+}
+
+/** Render an HTML table as a markdown-style plain text table */
+function tableToText(table: Element): string {
+  const rows: string[][] = [];
+  for (const row of Array.from(table.querySelectorAll("tr"))) {
+    const cells = Array.from(row.querySelectorAll("th,td")).map(
+      (c) => (c as Element).textContent?.replace(/\s+/g, " ").trim() ?? "",
+    );
+    if (cells.length) rows.push(cells);
+  }
+  if (!rows.length) return "";
+
+  const cols = Math.max(...rows.map((r) => r.length));
+  const widths = Array.from({ length: cols }, (_, i) =>
+    Math.max(...rows.map((r) => (r[i] ?? "").length), 3),
+  );
+
+  const fmt = (row: string[]) =>
+    "| " + widths.map((w, i) => (row[i] ?? "").padEnd(w)).join(" | ") + " |";
+
+  const sep = "| " + widths.map((w) => "-".repeat(w)).join(" | ") + " |";
+
+  const out: string[] = [fmt(rows[0]!), sep];
+  for (const row of rows.slice(1)) out.push(fmt(row));
+  return out.join("\n");
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
