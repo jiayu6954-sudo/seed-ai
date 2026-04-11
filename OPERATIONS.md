@@ -2,12 +2,13 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-09 · v0.9.2-alpha.25 (r42) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
+**最后更新：2026-04-09 · v0.9.2-alpha.26 (r43) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.26 r43  | 2026-04-09 | FEAT: GitHub 仓库学习能力 — API路由+base64解码+Token注入+系统提示学习工作流 |
 | alpha.25 r42  | 2026-04-09 | FEAT: Mozilla Readability 内容提取 + 科研/金融数据源注入系统提示 |
 | alpha.25 r41  | 2026-04-09 | BUG FIX: P016 — 连续工具错误无限循环（web_search GFW 阻断触发 200 次迭代）|
 | alpha.24 r40  | 2026-04-09 | DOCS: 白皮书 10 处测试数据同步（14→18，零测试→基础覆盖，评分 2/5→2.5/5）|
@@ -25,6 +26,113 @@
 | v0.9.0 r30    | 2026-04-04 | I011 本地模型自发现 · I012 语义向量检索 · I013 本地模型记忆提取 |
 | v0.8.0 r20    | 2026-04-03 | I001–I010 基础创新完成 · BUG FIX · UI 修复 |
 | v0.6.0        | 2026-04-02 | P001 滚动修复 · P002 Shift+Enter 换行 |
+
+---
+
+## 2026-04-09 · v0.9.2-r43 (GitHub 仓库学习能力)
+
+### [FEAT] GitHub 仓库学习 — 从开源项目中提取和融合知识
+
+**触发背景**：用户提问"给系统一个开源 GitHub 地址，它能提取学习并把知识融入 Seed AI 吗？"系统之前完全不支持 GitHub API，web_fetch 遇到 `api.github.com` 会失败（JSON base64 编码文件内容无法识别）。
+
+**问题根因**：
+- `api.github.com` 返回 JSON，文件内容字段 `content` 是 **base64 编码**的字符串，不是可读文本
+- 没有 Authorization 头 → 匿名只有 60 req/hr → 容易触发 403
+- 系统提示中没有 GitHub API URL 模板，AI 不知道如何访问仓库
+
+**解决方案（5 步实施）**：
+
+**Step 1 — `src/config/schema.ts`：添加 `github.token` 设置项**
+```typescript
+github: z.object({
+  token: z.string().optional(),
+}).default({}),
+```
+- 用户在设置 UI 中填入 GitHub PAT（Personal Access Token）
+- scope 仅需 `public_repo`（只读公开仓库）
+- 有 token: 5000 req/hr；无 token: 60 req/hr
+
+**Step 2 — `src/types/tools.ts`：扩展 `ToolExecutionContext`**
+```typescript
+export interface ToolExecutionContext {
+  cwd: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  githubToken?: string;  // 新增
+}
+```
+
+**Step 3 — `src/tools/registry.ts`：Token 注入到 ctx**
+```typescript
+private githubToken: string | undefined;
+// constructor 第 8 个参数:
+constructor(..., githubToken?: string) {
+  this.githubToken = githubToken;
+}
+// execute() 内:
+const ctx: ToolExecutionContext = {
+  cwd: this.cwd,
+  timeoutMs: 30_000,
+  signal: opts.signal,
+  githubToken: this.githubToken,  // 新增
+};
+```
+
+**Step 4 — `src/tools/web-fetch.ts`：GitHub API 专用路由 + base64 解码**
+
+早期路由拦截：
+```typescript
+if (input.url.startsWith("https://api.github.com/")) {
+  return fetchGitHub(input, ctx);
+}
+```
+
+`fetchGitHub()` 实现：
+- 构建带可选 `Authorization: Bearer <token>` 的请求头
+- 优先 native fetch，失败回退 curl
+- 调用 `renderGitHubResponse()` 渲染结果
+
+`renderGitHubResponse()` 处理 4 种响应形状：
+| 形状 | 判断条件 | 输出 |
+|------|---------|------|
+| 目录列表 | `Array.isArray(data)` | `📁`/`📄` 带大小的目录树 |
+| 单文件 | `data.type === "file"` | `Buffer.from(data.content, "base64").toString("utf-8")` 直接返回源码 |
+| 仓库元数据 | `data.full_name` | 仓库信息摘要 + API 链接 |
+| git tree | `data.tree` | 完整递归文件树列表 |
+
+**Step 5 — `src/ui/hooks/useAgentLoop.ts`：从设置注入 Token**
+```typescript
+const tools = new ToolRegistry(
+  cwd, mcpRegistry, activeSandbox, searchConfig,
+  researchRunner, undefined, hooksConfig,
+  settings.github?.token  // 新增第 8 参数
+);
+```
+
+**Step 6 — `src/agent/system-prompt.ts`：GitHub 学习工作流注入 AI 上下文**
+```
+GitHub repository learning — use web_fetch to read open source repos:
+- Repo metadata:  https://api.github.com/repos/OWNER/REPO
+- Directory tree: https://api.github.com/repos/OWNER/REPO/contents/PATH
+- Full file tree: https://api.github.com/repos/OWNER/REPO/git/trees/BRANCH?recursive=1
+- Single file:    https://api.github.com/repos/OWNER/REPO/contents/PATH/TO/FILE
+- Raw file:       https://raw.githubusercontent.com/OWNER/REPO/BRANCH/PATH/TO/FILE
+Workflow: metadata → git tree → key files → synthesise
+```
+
+**TS 错误修复 — `src/agent/research-loop.ts`**：
+- `makeResearchSettings()` 函数缺少 `github: {}` 字段 → 类型检查失败
+- 修复：在 mock settings 对象末尾加 `github: {}`
+
+**验证结果**：
+- `npx tsc --noEmit` → 0 错误
+- `npx vitest run` → **18/18 passed**
+- `npm run build` → `dist/index.js 309.51 KB ⚡ Build success`
+
+**用户收益**：
+- 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
+- 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
+- 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
 
 ---
 

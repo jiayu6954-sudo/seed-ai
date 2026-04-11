@@ -328,7 +328,7 @@ export function useAgentLoop({
         });
       // I027: hooks config from settings
       const hooksConfig = settings.hooks ?? {};
-      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox, searchConfig, researchRunner, undefined, hooksConfig);
+      const tools = new ToolRegistry(cwd, mcpRegistry, activeSandbox, searchConfig, researchRunner, undefined, hooksConfig, settings.github?.token);
       const permissions = new PermissionManager(settings, promptUser, !!activeSandbox);
 
       // Innovation 3: inject summary context from prior compressions

@@ -24,6 +24,8 @@ export interface ToolExecutionContext {
   cwd: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  /** GitHub Personal Access Token — auto-injected into api.github.com requests */
+  githubToken?: string;
 }
 
 export interface ToolResult {

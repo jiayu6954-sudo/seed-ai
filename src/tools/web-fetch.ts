@@ -46,6 +46,13 @@ export async function executeWebFetch(
 
   logger.debug("web_fetch.execute", { url: input.url, maxBytes });
 
+  // ── GitHub API: special handling ─────────────────────────────────────────
+  // api.github.com responses are JSON. File contents are base64-encoded.
+  // We decode them and return clean text so AI can read source directly.
+  if (input.url.startsWith("https://api.github.com/")) {
+    return fetchGitHub(input, ctx);
+  }
+
   // Derive Referer: explicit override wins, then URL's own origin as fallback
   let referer = input.referer ?? "";
   if (!referer) {
@@ -233,6 +240,147 @@ async function tryCurlFetch(
       isError: true,
     };
   }
+}
+
+// ── GitHub API handler ─────────────────────────────────────────────────────
+//
+// Handles api.github.com endpoints transparently:
+//   - /repos/{owner}/{repo}           → repo metadata summary
+//   - /repos/{owner}/{repo}/contents/{path} → file: decode base64, return source
+//                                          → dir:  return file listing
+//   - /repos/{owner}/{repo}/git/trees/{sha}?recursive=1 → full tree listing
+//   - Any other endpoint              → pretty-print JSON as-is
+//
+// Auto-injects Authorization header when githubToken is set.
+// Falls back to curl when native fetch times out (same pattern as main path).
+
+async function fetchGitHub(
+  input: WebFetchInput,
+  ctx: ToolExecutionContext,
+): Promise<ToolResult> {
+  const headers: Record<string, string> = {
+    "User-Agent": "seed-ai/0.9.2",
+    "Accept": "application/vnd.github.v3+json",
+    ...(ctx.githubToken ? { "Authorization": `Bearer ${ctx.githubToken}` } : {}),
+    ...(input.headers ?? {}),
+  };
+
+  logger.debug("web_fetch.github", { url: input.url, authed: !!ctx.githubToken });
+
+  let body = "";
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    if (ctx.signal) ctx.signal.addEventListener("abort", () => ctrl.abort());
+    try {
+      const res = await fetch(input.url, { headers, signal: ctrl.signal, redirect: "follow" });
+      clearTimeout(t);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        const hint = res.status === 403
+          ? "GitHub API rate limit exceeded. Add github.token to ~/.seed/settings.json (free, 5000 req/hr)."
+          : res.status === 404
+          ? "Repository or path not found. Check the URL is correct and the repo is public."
+          : `HTTP ${res.status}`;
+        return { content: `GitHub API error: ${hint}\n${text}`, isError: true };
+      }
+      body = await res.text();
+    } finally {
+      clearTimeout(t);
+    }
+  } catch (err) {
+    // curl fallback for network issues
+    try {
+      const curlArgs = ["-sL", "--max-time", "15"];
+      for (const [k, v] of Object.entries(headers)) curlArgs.push("-H", `${k}: ${v}`);
+      curlArgs.push(input.url);
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(execFile);
+      const { stdout } = await execAsync(CURL_BIN, curlArgs, { maxBuffer: 4 * 1024 * 1024 });
+      body = stdout;
+    } catch (e2) {
+      return { content: `GitHub fetch failed: ${String(err)}\ncurl also failed: ${String(e2)}`, isError: true };
+    }
+  }
+
+  // Parse and render the response
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return { content: body, isError: false }; }
+
+  return renderGitHubResponse(input.url, parsed);
+}
+
+/** Render GitHub API JSON into human-readable plain text */
+function renderGitHubResponse(url: string, data: unknown): ToolResult {
+  // Directory listing: array of {name, type, size, sha, download_url}
+  if (Array.isArray(data)) {
+    const items = (data as Array<{ name: string; type: string; size?: number; sha: string }>);
+    const dirs  = items.filter(i => i.type === "dir").map(i => `  📁 ${i.name}/`);
+    const files = items.filter(i => i.type === "file").map(i => `  📄 ${i.name}  (${i.size ?? 0} bytes)`);
+    const lines = [
+      `GitHub directory: ${url}`,
+      `${items.length} items (${dirs.length} dirs, ${files.length} files)`,
+      "",
+      ...dirs,
+      ...files,
+    ];
+    return { content: lines.join("\n"), isError: false };
+  }
+
+  const obj = data as Record<string, unknown>;
+
+  // Single file: has "content" field with base64 encoding
+  if (obj["type"] === "file" && typeof obj["content"] === "string") {
+    const decoded = Buffer.from(obj["content"] as string, "base64").toString("utf-8");
+    const name    = String(obj["name"] ?? "file");
+    const size    = String(obj["size"] ?? decoded.length);
+    const sha     = String(obj["sha"] ?? "");
+    const maxBytes = 80_000;
+    const truncated = decoded.length > maxBytes;
+    const content = truncated ? decoded.slice(0, maxBytes) : decoded;
+    const suffix  = truncated ? `\n\n[File truncated at ${maxBytes} bytes — use maxBytes param or read by sections]` : "";
+    return {
+      content: `GitHub file: ${name}  (${size} bytes, sha: ${sha.slice(0, 8)})\n\n${content}${suffix}`,
+      isError: false,
+      metadata: { bytesRead: Math.min(decoded.length, maxBytes), truncated },
+    };
+  }
+
+  // Repo metadata: has "full_name", "description", "stargazers_count" etc.
+  if (typeof obj["full_name"] === "string") {
+    const r = obj as Record<string, unknown>;
+    const lines = [
+      `Repository: ${r["full_name"]}`,
+      `Description: ${r["description"] ?? "—"}`,
+      `Stars: ${r["stargazers_count"]}  Forks: ${r["forks_count"]}  Watchers: ${r["subscribers_count"]}`,
+      `Language: ${r["language"] ?? "—"}  License: ${(r["license"] as Record<string,unknown> | null)?.["name"] ?? "—"}`,
+      `Default branch: ${r["default_branch"]}`,
+      `Topics: ${(r["topics"] as string[] | undefined)?.join(", ") ?? "—"}`,
+      `Created: ${r["created_at"]}  Updated: ${r["updated_at"]}`,
+      `URL: ${r["html_url"]}`,
+      "",
+      `README / tree: ${r["html_url"]}/blob/${r["default_branch"]}/README.md`,
+      `API contents: https://api.github.com/repos/${r["full_name"]}/contents/`,
+      `API full tree: https://api.github.com/repos/${r["full_name"]}/git/trees/${r["default_branch"]}?recursive=1`,
+    ];
+    return { content: lines.join("\n"), isError: false };
+  }
+
+  // Git tree (recursive listing)
+  if (obj["tree"] && Array.isArray(obj["tree"])) {
+    const tree = obj["tree"] as Array<{ path: string; type: string; size?: number }>;
+    const lines = [`GitHub tree: ${url}`, `${tree.length} entries`, ""];
+    for (const node of tree) {
+      const icon = node.type === "tree" ? "📁" : "📄";
+      const size = node.size ? `  (${node.size}b)` : "";
+      lines.push(`${icon} ${node.path}${size}`);
+    }
+    return { content: lines.join("\n"), isError: false };
+  }
+
+  // Default: pretty-print JSON
+  return { content: `GitHub API response:\n\n${JSON.stringify(data, null, 2)}`, isError: false };
 }
 
 // ── Shared response builder ────────────────────────────────────────────────

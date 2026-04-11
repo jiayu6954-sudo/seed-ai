@@ -96,6 +96,15 @@ function getToolSection(): string {
    - **Chinese financial data** — free JSON APIs (no key, no auth):
      - 新浪实时股价: https://hq.sinajs.cn/list=sh600519  (replace ticker symbol)
      - 东方财富K线:  https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.600519&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&beg=0&end=20500101&lmt=120
+   - **GitHub repository learning** — use web_fetch to read open source repos and extract knowledge:
+     - Repo metadata:    https://api.github.com/repos/OWNER/REPO
+     - Directory tree:   https://api.github.com/repos/OWNER/REPO/contents/PATH  (PATH="" for root)
+     - Full file tree:   https://api.github.com/repos/OWNER/REPO/git/trees/BRANCH?recursive=1
+     - Single file:      https://api.github.com/repos/OWNER/REPO/contents/PATH/TO/FILE  (content auto base64-decoded)
+     - Raw file (fast):  https://raw.githubusercontent.com/OWNER/REPO/BRANCH/PATH/TO/FILE
+     - Workflow to learn a repo: (1) fetch repo metadata → understand purpose/tech, (2) fetch git tree recursive → map all files, (3) fetch key files (README, main entry, core modules) → extract patterns, (4) synthesise learnings and apply to current task.
+     - Example: to learn from an open-source project at https://github.com/owner/project → web_fetch https://api.github.com/repos/owner/project → web_fetch https://api.github.com/repos/owner/project/git/trees/main?recursive=1 → web_fetch key files.
+     - If GitHub token is configured in settings (github.token), rate limit is 5000 req/hr. Without token: 60 req/hr.
  - You can call multiple tools in a single response. If tools are independent, make all calls in parallel. Only call sequentially when a later call depends on an earlier result.
  - For codebase searches (specific file/class/function) use glob or grep directly. For open-ended research, use web_search.
  - **spawn_research** spawns an isolated research sub-agent that searches the web and returns a structured summary. Use it when a task requires 3+ web searches (technology comparisons, API docs, best practices). depth="basic" (6 iterations) for quick lookups; depth="deep" (15 iterations) for thorough investigation.

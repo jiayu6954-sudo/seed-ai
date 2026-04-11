@@ -153,6 +153,16 @@ export const SettingsSchema = z.object({
     })
     .default({}),
 
+  // ── GitHub integration ────────────────────────────────────────────────────
+  github: z
+    .object({
+      /** Personal Access Token — enables GitHub REST API (5000 req/hr vs 60 unauthenticated).
+       *  Minimum scope: public_repo (read-only).
+       *  Generate at: https://github.com/settings/tokens */
+      token: z.string().optional(),
+    })
+    .default({}),
+
   // ── Hooks (I027) — PreToolUse / PostToolUse shell commands ───────────────
   hooks: z
     .object({

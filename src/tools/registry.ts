@@ -93,6 +93,7 @@ export class ToolRegistry {
   private researchRunner: ResearchRunner | null = null;
   private allowedTools: Set<ToolName> | null = null;
   private hooksConfig: HooksConfig;
+  private githubToken: string | undefined;
   // Innovation 2: per-session tool result cache
   readonly cache = new ToolCache();
 
@@ -104,6 +105,7 @@ export class ToolRegistry {
     researchRunner?: ResearchRunner,
     allowedTools?: Set<ToolName>,
     hooksConfig?: HooksConfig,
+    githubToken?: string,
   ) {
     this.cwd = cwd;
     this.mcpRegistry = mcpRegistry ?? null;
@@ -112,6 +114,7 @@ export class ToolRegistry {
     this.researchRunner = researchRunner ?? null;
     this.allowedTools = allowedTools ?? null;
     this.hooksConfig = hooksConfig ?? {};
+    this.githubToken = githubToken;
   }
 
   /** Returns tool definitions in provider-neutral format (native + MCP).
@@ -141,6 +144,7 @@ export class ToolRegistry {
       cwd: this.cwd,
       timeoutMs: 30_000,
       signal: opts.signal,
+      githubToken: this.githubToken,
     };
 
     logger.debug("tool.execute", { toolName });

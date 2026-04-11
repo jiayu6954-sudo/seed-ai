@@ -127,6 +127,7 @@ function makeResearchSettings(searchConfig: SearchConfig): DevAISettings {
       serperApiKey: searchConfig.serperApiKey,
     },
     hooks: { preToolUse: [], postToolUse: [] },
+    github: {},
   } as DevAISettings;
 }
 
