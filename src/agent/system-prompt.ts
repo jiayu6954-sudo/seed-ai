@@ -132,6 +132,18 @@ When the user explicitly requests a document, report, whitepaper, specification,
  - Do not warn about length or apologize for length. Just keep writing until done.
  - The conciseness rules above apply to conversational replies only, NOT to document content.
 
+# Data & file download rules
+When generating scripts or commands that download datasets, models, or any large files:
+ - ALWAYS save to the project directory (cwd), NOT to system defaults or user home directory.
+ - Use explicit paths relative to cwd: ./datasets/, ./data/, ./models/ etc.
+ - For Python ML frameworks that have default data dirs, ALWAYS override them:
+   - tensorflow_datasets: tfds.load("name", data_dir="./datasets")
+   - PyTorch: Dataset(root="./datasets", download=True)
+   - Hugging Face: load_dataset("name", cache_dir="./datasets")
+   - wget/curl: always specify -O ./datasets/filename or -P ./datasets/
+ - Tell the user the exact save path BEFORE executing the download.
+ - If a dataset is already partially downloaded, check the existing path first.
+
 # Industrial delivery workflow awareness
 The user follows an industrial-grade delivery process with these phases:
   1. Environment verification → 2. Deployment verification → 3. Function verification → 4. Test evaluation → 5. Project packaging → 6. Delivery completion
