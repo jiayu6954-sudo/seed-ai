@@ -111,14 +111,22 @@ describe("loadLongTermMemory", () => {
 
 describe("hasLongTermMemory", () => {
   let projectPath: string;
+  let savedUserMemory: string | null = null;
+  const userMemPath = path.join(memoryRoot(), "user.md");
 
   beforeEach(async () => {
     projectPath = await makeTempProject();
+    // Guard: hasLongTermMemory checks mem.user — real user.md must be hidden
+    try { savedUserMemory = await fs.readFile(userMemPath, "utf-8"); await fs.unlink(userMemPath); }
+    catch { savedUserMemory = null; }
   });
 
   afterEach(async () => {
     await clearProjectMemory(projectPath);
     await fs.rm(projectPath, { recursive: true, force: true });
+    if (savedUserMemory !== null) await fs.writeFile(userMemPath, savedUserMemory, "utf-8");
+    else try { await fs.unlink(userMemPath); } catch { /* ok */ }
+    savedUserMemory = null;
   });
 
   it("returns false when no memory exists", async () => {
@@ -183,13 +191,21 @@ describe("formatMemoryForPrompt", () => {
 
 describe("clearProjectMemory", () => {
   let projectPath: string;
+  let savedUserMemory: string | null = null;
+  const userMemPath = path.join(memoryRoot(), "user.md");
 
   beforeEach(async () => {
     projectPath = await makeTempProject();
+    // Guard: clearProjectMemory test checks hasLongTermMemory after clear — user.md must not interfere
+    try { savedUserMemory = await fs.readFile(userMemPath, "utf-8"); await fs.unlink(userMemPath); }
+    catch { savedUserMemory = null; }
   });
 
   afterEach(async () => {
     await fs.rm(projectPath, { recursive: true, force: true });
+    if (savedUserMemory !== null) await fs.writeFile(userMemPath, savedUserMemory, "utf-8");
+    else try { await fs.unlink(userMemPath); } catch { /* ok */ }
+    savedUserMemory = null;
   });
 
   it("removes all project memory files", async () => {
