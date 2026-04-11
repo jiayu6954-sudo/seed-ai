@@ -34,7 +34,10 @@ export async function executeGlob(
     const results = sorted.slice(0, MAX_RESULTS);
 
     if (results.length === 0) {
-      return { content: `No files matched pattern: ${input.pattern}`, isError: false };
+      return {
+        content: `No files matched pattern "${input.pattern}" in: ${basePath}`,
+        isError: false,
+      };
     }
 
     const lines = results.join("\n");
