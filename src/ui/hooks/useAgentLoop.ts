@@ -219,6 +219,8 @@ export function useAgentLoop({
       // I021: /plan rewrites the user input with planning instructions before sending to LLM
       // The UI still shows the original user input; the LLM receives the enriched planning prompt.
       // type === "passthrough" → fall through unchanged
+      // Wrap ALL setup + loop code so any pre-loop throw also resets state via finally.
+      try {
       let effectiveInput = slashResult.type === "rewrite" ? slashResult.input : userInput;
       let dynamicHardLimit: number | undefined;
       const parsedBudget = parseTokenBudget(userInput);
@@ -524,8 +526,7 @@ export function useAgentLoop({
         }
       };
 
-      try {
-        // Innovation 1: parallel tool execution via runAgentLoop
+      // Innovation 1: parallel tool execution via runAgentLoop
         // Innovation 2: tool cache via ToolRegistry
         // Innovation 4: stats tracking via statsRef
         const loopResult = await runAgentLoop(

@@ -46,14 +46,33 @@ async function seedUserMemory(content: string): Promise<void> {
 
 describe("loadLongTermMemory", () => {
   let projectPath: string;
+  let savedUserMemory: string | null = null;
 
   beforeEach(async () => {
     projectPath = await makeTempProject();
+    // Save and clear real user.md so tests get a clean slate
+    const root = memoryRoot();
+    const userFile = path.join(root, "user.md");
+    try {
+      savedUserMemory = await fs.readFile(userFile, "utf-8");
+      await fs.rm(userFile, { force: true });
+    } catch {
+      savedUserMemory = null;
+    }
   });
 
   afterEach(async () => {
     await clearProjectMemory(projectPath);
     await fs.rm(projectPath, { recursive: true, force: true });
+    // Restore real user.md
+    const root = memoryRoot();
+    const userFile = path.join(root, "user.md");
+    if (savedUserMemory !== null) {
+      await fs.writeFile(userFile, savedUserMemory, "utf-8");
+    } else {
+      await fs.rm(userFile, { force: true });
+    }
+    savedUserMemory = null;
   });
 
   it("returns empty strings when no memory exists", async () => {
