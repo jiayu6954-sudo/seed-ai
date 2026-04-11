@@ -419,7 +419,26 @@ class OAIStreamHandle implements ProviderStreamHandle {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`${this.params.model} API ${response.status}: ${text}`);
+      // Parse JSON error body to extract human-readable message
+      let detail = text;
+      try {
+        const parsed = JSON.parse(text) as { error?: { message?: string } };
+        if (parsed?.error?.message) detail = parsed.error.message;
+      } catch { /* keep raw text */ }
+
+      // Translate common HTTP codes into actionable messages
+      let hint = "";
+      if (response.status === 402) {
+        hint = "\n→ API account has insufficient balance. Please top up your account.";
+      } else if (response.status === 401) {
+        hint = "\n→ Invalid API key. Check your key in Settings.";
+      } else if (response.status === 429) {
+        hint = "\n→ Rate limit reached. Wait a moment and try again.";
+      } else if (response.status === 503 || response.status === 529) {
+        hint = "\n→ Provider is temporarily overloaded. Try again shortly.";
+      }
+
+      throw new Error(`${this.params.model} API error ${response.status}: ${detail}${hint}`);
     }
 
     if (!response.body) throw new Error("Empty response body");

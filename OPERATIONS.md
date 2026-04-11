@@ -2,12 +2,17 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-09 · v0.9.2-alpha.26 (r43) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
+**最后更新：2026-04-11 · v0.9.2-alpha.27 (r48) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.27 r48  | 2026-04-11 | FIX: streaming 状态长等待指示器 — 10s 计时器防"冻结感" |
+| alpha.27 r47  | 2026-04-11 | FIX: 数据下载路径规则注入系统提示 + Plant Village 数据集迁移至项目目录 |
+| alpha.27 r46  | 2026-04-11 | FEAT: bash 实时输出流 — tool_progress 事件 + Static 零抖动进度显示 |
+| alpha.27 r45  | 2026-04-11 | FIX: OAI 错误消息增强 — 402/401/429/503 解析为可操作提示 |
+| alpha.27 r44  | 2026-04-11 | BUG FIX: submit() 预循环崩溃(Node.js unhandled rejection) + 测试 user.md 污染 |
 | alpha.26 r43  | 2026-04-09 | FEAT: GitHub 仓库学习能力 — API路由+base64解码+Token注入+系统提示学习工作流 |
 | alpha.25 r42  | 2026-04-09 | FEAT: Mozilla Readability 内容提取 + 科研/金融数据源注入系统提示 |
 | alpha.25 r41  | 2026-04-09 | BUG FIX: P016 — 连续工具错误无限循环（web_search GFW 阻断触发 200 次迭代）|
@@ -133,6 +138,304 @@ Workflow: metadata → git tree → key files → synthesise
 - 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
 - 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
 - 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r48 (StatusBar 流式等待指示器)
+
+### [FIX] 长时间模型推理期间显示"冻结"问题
+
+**触发背景**：用户重启 seed 后输入数据集检查指令，AI 输出"正在检查数据集"后系统长时间无响应（约 2.5 分钟），用户误认为系统崩溃。
+
+**问题根因**：
+- AI 调用 bash 工具完成后，模型进入流式生成阶段（`streaming` 状态）
+- DeepSeek 在大上下文（多轮工具结果）场景下 TTFT（首 token 延迟）可达 1-3 分钟
+- StatusBar 的已用时计时器**在 streaming 状态下被完全抑制**（防止每秒重绘导致抖动）
+- 结果：UI 显示"⠋ thinking  …"，没有任何时间流逝的指示，用户无法判断是运行中还是卡死
+
+**解决方案**：
+
+**`src/ui/components/StatusBar.tsx`**：
+
+1. 取消对 `streaming` 状态的计时器完全抑制，改为低频更新（每 10 秒一次代替每 1 秒）：
+```typescript
+// streaming: use a 10s interval — token counter provides fine-grained feedback
+// when tokens arrive; elapsed shows time passing when model is slow (long TTFT)
+const interval = state === "streaming" ? 10_000 : 1_000;
+const id = setInterval(() => {
+  if (t0.current) setElapsed(Math.floor((Date.now() - t0.current) / 1000));
+}, interval);
+```
+
+2. 当 streaming 状态下尚未收到任何 token 且已超过 5 秒时，hint 行显示已用时而非"…"：
+```typescript
+: state === "streaming"
+  ? (streamingTokens > 0
+      ? `  ${streamingTokens} tok`
+      : elapsed > 5 ? `  ${symbols.clock} ${fmtSecs(elapsed)}` : "  …")
+```
+
+**效果对比**：
+| 场景 | 修复前 | 修复后 |
+|------|--------|--------|
+| 模型快速响应（< 5s） | "thinking  …" | "thinking  …" （不变） |
+| token 流式输出中 | "thinking  127 tok" | "thinking  127 tok" （不变） |
+| 模型慢速响应（> 5s，0 token） | "thinking  …"（冻结感） | "thinking  ⏱ 2m30s"（清晰进度） |
+
+**验证结果**：
+- `npm run build` → `312.81 KB ⚡ Build success`
+- `npx vitest run` → **18/18 passed**
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r47 (数据下载路径规则 + Plant Village 数据集迁移)
+
+### [FIX] 数据集下载至 C 盘而非项目目录
+
+**触发背景**：用户让 AI 下载 Plant Village 数据集，AI 使用 TensorFlow Datasets 默认行为，将 561MB ZIP 文件下载到 `C:\Users\Administrator\tensorflow_datasets\`，而非项目目录。
+
+**问题根因**：
+- `tfds.load()` 默认 `data_dir=~/tensorflow_datasets/`（Windows 上为 C: 盘用户目录）
+- PyTorch、Hugging Face 数据集有类似的系统默认保存路径
+- AI 没有被指导覆盖这些默认值
+
+**解决方案**：
+
+**`src/agent/system-prompt.ts`**：注入数据下载规则到系统提示
+```
+# Data & file download rules
+ - ALWAYS save to the project directory (cwd), NOT to system defaults
+ - tensorflow_datasets: tfds.load("name", data_dir="./datasets")
+ - PyTorch: Dataset(root="./datasets", download=True)
+ - Hugging Face: load_dataset("name", cache_dir="./datasets")
+ - wget/curl: always specify -O ./datasets/filename or -P ./datasets/
+ - Tell user exact save path BEFORE executing
+```
+
+注意：规则内不得使用反引号（会被 TypeScript 模板字面量解析器误识别为代码），已使用普通引号替代。
+
+**手动迁移**：将已下载的 561MB ZIP 从 C 盘迁移至项目目录：
+- 原路径：`C:\Users\Administrator\tensorflow_datasets\downloads\plant_village\[tmp]\`
+- 目标路径：`D:\claude\devai\datasets\plant_village\Plant_leaf_diseases_dataset_without_augmentation.zip`
+
+**验证结果**：
+- `npm run build` → build 成功
+- `npx vitest run` → 18/18 passed
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r46 (bash 实时输出流)
+
+### [FEAT] 长运行命令实时进度显示 — 零抖动 Static 渲染
+
+**触发背景**：用户运行数据集下载/处理脚本（70+ 分钟），UI 无任何进度反馈，用户不知系统是否还在执行。且原有动态渲染区导致终端屏幕抖动。
+
+**核心创新**：
+- 新增 `tool_progress` 事件类型：bash 工具每 2s 或每 2KB 冲出一次输出 chunk
+- 进度消息使用 `isStreaming: false`（Static 模式）渲染：写入滚动缓冲区后**永远不重绘**，完全消除抖动
+
+**实施步骤**：
+
+**Step 1 — `src/types/agent.ts`**：添加新事件类型
+```typescript
+| { type: "tool_progress"; toolId: string; chunk: string };
+```
+
+**Step 2 — `src/tools/bash.ts`**：流式输出
+```typescript
+export async function executeBash(
+  input: BashInput,
+  ctx: ToolExecutionContext,
+  onProgress?: (chunk: string) => void  // 新增第 3 参数
+): Promise<ToolResult> {
+  // ...
+  const subprocess = execa(...);  // 改为非 await 启动
+
+  if (onProgress && subprocess.all) {
+    const FLUSH_INTERVAL_MS = 2_000;
+    const FLUSH_BYTES = 2_048;
+    let buf = "";
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = (): void => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (buf.length > 0) { onProgress(buf); buf = ""; }
+    };
+    subprocess.all.on("data", (chunk: Buffer | string) => {
+      buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (buf.length >= FLUSH_BYTES) { flush(); }
+      else if (!timer) { timer = setTimeout(flush, FLUSH_INTERVAL_MS); }
+    });
+    subprocess.all.once("end", flush);
+  }
+  const result = await subprocess;
+```
+
+**Step 3 — `src/tools/registry.ts`**：透传 onProgress
+```typescript
+// execute() 参数扩展:
+opts: { signal?: AbortSignal; onProgress?: (chunk: string) => void } = {}
+// bash case:
+result = await executeBash(input, ctx, opts.onProgress);
+```
+
+**Step 4 — `src/agent/loop.ts`**：透传到工具调用
+```typescript
+const result = await tools.execute(toolName, toolBlock.input, {
+  signal,
+  onProgress: (chunk: string) => {
+    onEvent({ type: "tool_progress", toolId: toolBlock.id, chunk });
+  },
+});
+```
+
+**Step 5 — `src/ui/hooks/useAgentLoop.ts`**：处理 tool_progress 事件
+```typescript
+case "tool_progress":
+  appendMessage({
+    id: randomUUID(),
+    role: "tool_result" as const,
+    content: [{ type: "text" as const, text: event.chunk }],
+    timestamp: new Date(),
+    isStreaming: false,  // Static → 写入滚动缓冲区，不重绘，零抖动
+  });
+  break;
+```
+
+**验证结果**：
+- `npm run build` → build 成功
+- `npx vitest run` → 18/18 passed
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r45 (API 错误消息增强)
+
+### [FIX] OAI 兼容层 402/401/429/503 错误提示不可操作
+
+**触发背景**：DeepSeek 账户余额为零时，系统报错"deepseek-chat API 402: {"error":{"message":"Insufficient Balance"...}}"，用户看到原始 JSON 不知该如何处理，且快速失败（< 0.5s）+ 状态快速恢复看起来像"系统崩溃"。
+
+**问题根因**：
+```typescript
+// 旧代码：直接抛出原始 HTTP 错误文本
+throw new Error(`${this.params.model} API error ${response.status}: ${text}`);
+```
+- 对 JSON 格式错误不解析，用户看到原始大括号
+- 无错误类型区分，无操作指引
+
+**解决方案 — `src/providers/openai-compatible.ts`**：
+```typescript
+if (!response.ok) {
+  const text = await response.text().catch(() => "");
+  let detail = text;
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: string } };
+    if (parsed?.error?.message) detail = parsed.error.message;
+  } catch { /* keep raw text */ }
+  let hint = "";
+  if (response.status === 402)
+    hint = "\n→ API account has insufficient balance. Please top up your account.";
+  else if (response.status === 401)
+    hint = "\n→ Invalid API key. Check your key in Settings.";
+  else if (response.status === 429)
+    hint = "\n→ Rate limit reached. Wait a moment and try again.";
+  else if (response.status === 503 || response.status === 529)
+    hint = "\n→ Provider is temporarily overloaded. Try again shortly.";
+  throw new Error(`${this.params.model} API error ${response.status}: ${detail}${hint}`);
+}
+```
+
+**效果**：
+- 402：`deepseek-chat API error 402: Insufficient Balance\n→ API account has insufficient balance. Please top up your account.`
+- 用户立即知道该充值，而不是以为系统崩溃
+
+**验证结果**：
+- `npm run build` → build 成功
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r44 (submit() 预循环崩溃 + 测试污染修复)
+
+### [BUG FIX] Node.js unhandled rejection 导致自动退出
+
+**触发背景**：用户报告"输入任何指令，自动退出"——实际上有两个独立问题同时发生，均在系统余额为零时触发。
+
+**问题一：DeepSeek 402 余额不足看起来像崩溃**
+- 余额归零 → API 在 < 0.5s 内返回 402
+- 错误处理完成 → 状态快速恢复到 idle
+- 用户视觉上看到：输入 → 短暂转圈 → 立即回到 idle（像退出）
+- 根因：不是代码 bug，是快速循环 + 状态恢复太快
+- 修复：r45 的错误提示改进（让用户看到具体错误而非疑惑）
+
+**问题二：submit() 预循环代码不在 try/catch 内**
+```typescript
+// 旧代码：只有 agent loop 本身在 try/catch 内
+const submit = useCallback(async (userInput: string) => {
+  // 这里有 300+ 行设置代码：createProvider, buildSystemPrompt...
+  // 任何这里抛出的异常 → Node.js unhandled rejection → process.exit(1)
+  try {
+    // agent loop 在这里
+  } catch (err) {
+    // 只处理 loop 内的错误
+  }
+}, [...]);
+```
+
+**修复 — `src/ui/hooks/useAgentLoop.ts`**：将 `try {` 上移到覆盖所有设置代码
+```typescript
+const submit = useCallback(async (userInput: string) => {
+  // ...slash command processing (must stay outside try)...
+  
+  // I021: /plan rewrites the user input...
+  // Wrap ALL setup + loop code so any pre-loop throw also resets state via finally.
+  try {
+    let effectiveInput = slashResult.type === "rewrite" ? slashResult.input : userInput;
+    // createProvider, buildSystemPrompt, new ToolRegistry, runAgentLoop...
+  } catch (err) {
+    // ...error handling
+  } finally {
+    // ...state reset (always runs, even on pre-loop throws)
+  }
+}, [...]);
+```
+
+关键：`finally` 块始终执行 → 即使 `createProvider()` 抛出，状态也会正确重置到 idle。
+
+**问题三：测试 user.md 文件污染**
+```
+✗ test/memory/long-term.test.ts > loadLongTermMemory > loads user memory
+  AssertionError: expected '' to equal 'Engineer building devai...'
+```
+
+**根因**：测试期望 `user.md` 不存在（`mem.user === ""`），但全局 `~/.seed/memory/user.md` 真实存在于磁盘，测试直接读取到了真实用户记忆。
+
+**修复 — `test/memory/long-term.test.ts`**：
+```typescript
+describe("loadLongTermMemory", () => {
+  let savedUserMemory: string | null = null;
+
+  beforeEach(async () => {
+    // 保存并删除真实的 user.md，防止污染测试结果
+    try {
+      savedUserMemory = await fs.readFile(userMemPath, "utf8");
+      await fs.unlink(userMemPath);
+    } catch {
+      savedUserMemory = null;
+    }
+  });
+
+  afterEach(async () => {
+    // 恢复真实的 user.md
+    if (savedUserMemory !== null) {
+      await fs.writeFile(userMemPath, savedUserMemory, "utf8");
+    } else {
+      try { await fs.unlink(userMemPath); } catch { /* 文件不存在，忽略 */ }
+    }
+  });
+```
+
+**验证结果**：
+- `npx vitest run` → **18/18 passed**（修复前：16/18，2 个污染测试失败）
+- `npm run build` → build 成功
+- `npx tsc --noEmit` → 0 错误
 
 ---
 

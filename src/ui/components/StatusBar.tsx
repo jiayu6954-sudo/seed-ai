@@ -62,12 +62,15 @@ export function StatusBar({
   React.useEffect(() => {
     if (state === "idle" || state === "error") { t0.current = null; setElapsed(0); return; }
     if (!t0.current) t0.current = Date.now();
-    // Suppress elapsed timer during streaming and permission_prompt:
-    // each setElapsed triggers an Ink repaint of the dynamic zone.
-    if (state === "streaming" || state === "permission_prompt") return;
+    // permission_prompt: any repaint causes cursor-tracking drift → no timer.
+    if (state === "permission_prompt") return;
+    // streaming: use a 10s interval so the user can see time passing when the
+    // model is slow (long TTFT / large context). Fine-grained 1s updates are
+    // unnecessary — token counter already provides feedback when tokens arrive.
+    const interval = state === "streaming" ? 10_000 : 1_000;
     const id = setInterval(() => {
       if (t0.current) setElapsed(Math.floor((Date.now() - t0.current) / 1000));
-    }, 1000);
+    }, interval);
     return () => clearInterval(id);
   }, [state]);
 
@@ -101,7 +104,7 @@ export function StatusBar({
   // terminal to scroll (scrollbar drifts during output).
   const hint =
     state === "permission_prompt" ? "  y · allow once    s · allow session    n · deny"
-    : state === "streaming"       ? (streamingTokens > 0 ? `  ${streamingTokens} tok` : "  …")
+    : state === "streaming"       ? (streamingTokens > 0 ? `  ${streamingTokens} tok` : elapsed > 5 ? `  ${symbols.clock} ${fmtSecs(elapsed)}` : "  …")
     : state === "tool_running"    ? "  …"   // keep same height as streaming to avoid 1-line jump
     : state === "compacting"      ? "  summarising context…"
     : null;
