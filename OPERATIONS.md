@@ -2,12 +2,14 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-11 · v0.9.2-alpha.27 (r49) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
+**最后更新：2026-04-12 · v0.9.2-alpha.27 (r51) · 下次更新节点：ML方案完整执行验证（YOLOv8 PlantVillage）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.27 r51  | 2026-04-12 | FIX: 测试隔离 — hasLongTermMemory/clearProjectMemory 受真实 user.md 污染 |
+| alpha.27 r50  | 2026-04-12 | FIX: Token 预算解析器误读 GPU 型号 (RTX 4070 → 4,070 token 上限) |
 | alpha.27 r49  | 2026-04-11 | FIX: 数据下载三重保障 — 强制前置检查/禁止重复下载/禁止后台进程 |
 | alpha.27 r48  | 2026-04-11 | FIX: streaming 状态长等待指示器 — 10s 计时器防"冻结感" |
 | alpha.27 r47  | 2026-04-11 | FIX: 数据下载路径规则注入系统提示 + Plant Village 数据集迁移至项目目录 |
@@ -139,6 +141,158 @@ Workflow: metadata → git tree → key files → synthesise
 - 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
 - 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
 - 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
+
+---
+
+## 协作协议 — 用户与 Claude Code 的工作约定
+
+> 本节记录用户与 Claude Code（Anthropic，claude-sonnet-4-6）之间在 devai/seed 项目上建立的协作模式，适用于所有后续会话。
+
+### 用户角色
+- **项目负责人**：决定需求优先级、功能方向、是否接受某次变更
+- **测试驱动者**：通过实际使用 seed 发现系统行为问题，提供一线反馈
+- **调试报告者**：每次出现异常时，提供系统输出截图/粘贴 → 触发日志检查流程
+- **最终裁判**：每次代码变更、git 提交、push 前均可 approve 或 reject
+
+### Claude Code 角色
+- **系统工程师**：负责诊断根因、实施修复、验证效果（build + test + push）
+- **日志分析员**：每次用户报告"出错/卡住/崩溃"时，优先读取 `~/.seed/debug.log` 判断真实状态
+- **记忆管理员**：重要修复和架构决策同步写入 OPERATIONS.md + `~/.claude/projects/*/memory/`
+- **诚实代理人**：不伪造数据、不在没有工具证据的情况下声称"任务已完成"
+
+### 标准工作流程
+
+```
+用户发现问题
+    ↓
+Claude 检查 debug.log（tail -100）
+    ↓
+定位根因（工具/系统提示/循环逻辑/UI层）
+    ↓
+实施最小化修复（只改必须改的）
+    ↓
+npm run build → npx vitest run → 全绿
+    ↓
+git commit + git push → 告知用户重启 seed
+    ↓
+用户验证 → 如通过：OPERATIONS.md 同步更新
+```
+
+### 调试约定
+
+| 场景 | Claude 做什么 |
+|------|--------------|
+| 系统显示"冻结" | 读 debug.log 最后 50 行，判断 state（streaming/tool_running/idle） |
+| 系统自动退出 | 检查是否有 `unhandled rejection`、402 错误、token budget 触发 |
+| AI 幻觉（编造结果） | 检查工具实际调用了几次，加强系统提示规则，不是 LLM 的问题就是规则不够强 |
+| 文件保存到错误位置 | 检查系统提示 data download 规则，收紧 FORBIDDEN paths |
+| 测试失败 | 先判断是代码 bug 还是测试环境污染，环境污染用 beforeEach/afterEach 隔离 |
+
+### 提示词规范（用户输入 seed 时）
+
+为避免触发误判，用户输入中：
+- **GPU 型号**（RTX 4070、RTX 3090）不会再被当作 token 预算（已修复 r50）
+- 指定 token 预算用明确语法：`+500k`、`spend 2M tokens`、`budget 1M`
+- 长任务提示词建议以 `【步骤X】` 或数字列表结构化，AI 逐步执行更稳定
+- 需要 AI 跳过权限确认时，启动后按 `s`（allow session），不是每次都按 `y`
+
+### 长期目标（双方共识）
+
+> 将 seed 调试到**专业级 AI 编码助手**水准：
+> - 工具调用稳定可靠，不幻觉、不重复、不误判
+> - 长任务（ML训练、数据处理）能持续运行并显示实时进度
+> - 错误有清晰的可操作提示，不需要用户看懂堆栈
+> - 跨项目使用时，行为一致（数据目录、进程管理、文件路径）
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r51 (测试隔离修复 · hasLongTermMemory + clearProjectMemory)
+
+### [FIX] 测试被真实 user.md 污染 — 第三批隔离修复
+
+**触发背景**：r50 修复后运行测试，发现 `hasLongTermMemory` 和 `clearProjectMemory` 两个 describe 块也出现"expected false got true"失败，原因与 r44 修复的 `loadLongTermMemory` 测试相同。
+
+**根因**：`hasLongTermMemory()` 的实现：
+```typescript
+return !!(mem.user || mem.projectContext || mem.projectDecisions || mem.projectLearnings);
+```
+它检查 `mem.user`，而 `user.md` 是**全局文件**，与具体项目路径无关。测试用 `makeTempProject()` 创建的临时目录虽然不存在任何项目记忆，但只要磁盘上存在 `~/.seed/memory/user.md`，`hasLongTermMemory` 就返回 true。
+
+**修复 — `test/memory/long-term.test.ts`**：为两个 describe 块添加 beforeEach/afterEach user.md 保护：
+```typescript
+beforeEach(async () => {
+  projectPath = await makeTempProject();
+  try { savedUserMemory = await fs.readFile(userMemPath, "utf-8"); await fs.unlink(userMemPath); }
+  catch { savedUserMemory = null; }
+});
+afterEach(async () => {
+  if (savedUserMemory !== null) await fs.writeFile(userMemPath, savedUserMemory, "utf-8");
+  else try { await fs.unlink(userMemPath); } catch { /* ok */ }
+  savedUserMemory = null;
+});
+```
+
+**验证结果**：`npx vitest run` → **18/18 passed**
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r50 (Token 预算解析器误读 GPU 型号)
+
+### [FIX] parseTokenBudget 将 "RTX 4070" 解析为 4,070 token 硬限制
+
+**触发背景**：用户将完整 ML 方案提示词输入 seed，系统立即返回：
+```
+● Token budget exceeded: 6,717/4,070 tokens used.
+  Raise tokenBudget.hardLimit in settings or start a new session.
+```
+用户 settings.json 中 `tokenBudget.hardLimit` 未设置，错误上限 4,070 来源不明。
+
+**根因追踪**：
+- 提示词中包含：`GPU：RTX 4070 Ti Super 16GB`
+- `parseTokenBudget()` 正则：`(\d+(?:\.\d+)?)` 匹配任意 ≥1,000 的裸数字
+- `4070` 满足 ≥1,000 条件 → 被解析为 **4,070 token 预算**
+- 会话开始时 hardLimit 被设为 4,070，第一轮 API 调用（约 6,717 tokens）就超限
+
+同类误报举例（修复前全部会被错误识别）：
+| 文本 | 误解析值 |
+|------|---------|
+| RTX 4070 | 4,070 |
+| 3.2M（模型参数）| 3,200,000 |
+| 54,305（数据集大小）| 54,305 |
+| 221,943（数据集规模）| 221,943 |
+
+**根本修复 — `src/utils/token-budget-parser.ts`**：
+
+废弃"裸数字 ≥1000 即接受"策略，改为严格三形式：
+
+| 形式 | 示例 | 说明 |
+|------|------|------|
+| A：动词 + 数字（可有/无后缀） | `spend 2M`, `budget 500k` | 有明确意图动词 |
+| B：`+` 前缀 + 数字 + k/m/b 后缀 | `+500k`, `+1.5m` | 有 + 符号表明是追加预算 |
+| C：数字 + k/m/b 后缀 + "tokens" 关键词 | `2M tokens`, `500k tok` | 有单位词明确语义 |
+
+裸数字（无动词、无+前缀、无tokens关键词）→ **一律拒绝**
+
+```typescript
+// Form A: explicit verb keyword
+const verbPattern = /(?:^|\s)(?:spend|budget|limit|use(?:\s+up\s+to)?|...) \s+\+?\s*(\d+...)/gi;
+// Form B: + prefix + k/m/b suffix
+const plusPattern = /(?:^|\s)\+\s*(\d+(?:\.\d+)?)\s*([kmb](?:illion)?)(...)/gi;
+// Form C: number + k/m/b + "tokens" word
+const suffixPattern = /(?:^|\s)(\d+(?:\.\d+)?)\s*([kmb](?:illion)?)(?:\s*(?:tokens?|tok|t))\b/gi;
+```
+
+**测试验证**：
+```
+RTX 4070        → null  ✓ (不再误解析)
+3.2M bare       → null  ✓ (无 tokens 关键词)
+batch=32        → null  ✓
++500k           → 500,000  ✓
+spend 2M tokens → 2,000,000  ✓
+budget 500k     → 500,000  ✓
+```
+
+**验证结果**：`npm run build` → 314.49 KB ✓ · `npx vitest run` → 18/18 ✓
 
 ---
 
