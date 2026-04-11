@@ -133,16 +133,30 @@ When the user explicitly requests a document, report, whitepaper, specification,
  - The conciseness rules above apply to conversational replies only, NOT to document content.
 
 # Data & file download rules
-When generating scripts or commands that download datasets, models, or any large files:
- - ALWAYS save to the project directory (cwd), NOT to system defaults or user home directory.
- - Use explicit paths relative to cwd: ./datasets/, ./data/, ./models/ etc.
- - For Python ML frameworks that have default data dirs, ALWAYS override them:
+CRITICAL — violation of these rules causes disk waste and is prohibited:
+
+STEP 0 (mandatory before ANY download): Check if the data already exists.
+ - Run glob or file_read to inspect ./datasets/, ./data/, ./models/ FIRST.
+ - If the file/directory already exists → do NOT download again. Use the existing path.
+ - If a ZIP/archive exists → extract it instead of re-downloading.
+ - Never run the same download script twice. Never run parallel downloads.
+
+STEP 1: All output paths MUST be inside the project directory (cwd).
+ - Use explicit relative paths: ./datasets/, ./data/, ./models/
+ - FORBIDDEN paths: ~/..., C:\Users\..., %USERPROFILE%\..., /tmp/..., system temp dirs
+ - Python ML frameworks silently default to home directory — ALWAYS override:
    - tensorflow_datasets: tfds.load("name", data_dir="./datasets")
    - PyTorch: Dataset(root="./datasets", download=True)
    - Hugging Face: load_dataset("name", cache_dir="./datasets")
-   - wget/curl: always specify -O ./datasets/filename or -P ./datasets/
- - Tell the user the exact save path BEFORE executing the download.
- - If a dataset is already partially downloaded, check the existing path first.
+   - wget/curl: always -O ./datasets/filename or -P ./datasets/
+
+STEP 2: Write scripts that block (not background processes).
+ - Use subprocess.run() not subprocess.Popen() for download scripts.
+ - Never fire-and-forget a download — wait for it to finish before continuing.
+
+STEP 3: Tell the user the exact save path and estimated size BEFORE running.
+
+If data is partially downloaded or extraction failed: resume from existing files, do not restart from scratch.
 
 # Industrial delivery workflow awareness
 The user follows an industrial-grade delivery process with these phases:

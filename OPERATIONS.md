@@ -2,12 +2,13 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-11 · v0.9.2-alpha.27 (r48) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
+**最后更新：2026-04-11 · v0.9.2-alpha.27 (r49) · 下次更新节点：集成测试扩展（流式/Hooks路径）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.27 r49  | 2026-04-11 | FIX: 数据下载三重保障 — 强制前置检查/禁止重复下载/禁止后台进程 |
 | alpha.27 r48  | 2026-04-11 | FIX: streaming 状态长等待指示器 — 10s 计时器防"冻结感" |
 | alpha.27 r47  | 2026-04-11 | FIX: 数据下载路径规则注入系统提示 + Plant Village 数据集迁移至项目目录 |
 | alpha.27 r46  | 2026-04-11 | FEAT: bash 实时输出流 — tool_progress 事件 + Static 零抖动进度显示 |
@@ -138,6 +139,61 @@ Workflow: metadata → git tree → key files → synthesise
 - 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
 - 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
 - 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
+
+---
+
+## 2026-04-11 · v0.9.2-alpha.27-r49 (数据下载三重保障)
+
+### [FIX] 数据集重复下载至 C 盘 — 根本性系统修复
+
+**触发背景**：AI 重复启动 3 个 Python 进程下载 Plant Village 数据集至 C 盘临时目录（`~/tensorflow_datasets/`），累计浪费 1.1GB C 盘空间；即便 r47 已在系统提示中写入 data_dir 规则，违规行为依然出现。
+
+**根因分析**：
+1. **规则软**：原规则只写"ALWAYS save to cwd"，AI 遇到已有示例代码时会优先遵循示例而非规则
+2. **缺少前置检查**：AI 没有被要求在下载前先检查文件是否已存在
+3. **允许后台进程**：AI 使用 `subprocess.Popen()` 或 `&` 启动后台进程后立即返回，多次触发后形成并发
+4. **没有明确禁止**：规则写"ALWAYS do X"，但没写"NEVER do Y"
+
+**三层修复 — `src/agent/system-prompt.ts`**：
+
+将原来的 6 行"建议"升级为强制 3 步流程：
+
+```
+STEP 0 (mandatory before ANY download): Check if the data already exists.
+ - Run glob or file_read to inspect ./datasets/, ./data/, ./models/ FIRST.
+ - If the file/directory already exists → do NOT download again.
+ - If a ZIP/archive exists → extract it instead of re-downloading.
+ - Never run the same download script twice. Never run parallel downloads.
+
+STEP 1: All output paths MUST be inside the project directory (cwd).
+ - FORBIDDEN paths: ~/..., C:\Users\..., %USERPROFILE%\..., /tmp/...
+ - tensorflow_datasets: tfds.load("name", data_dir="./datasets")
+ - ...
+
+STEP 2: Write scripts that block (not background processes).
+ - Use subprocess.run() not subprocess.Popen().
+ - Never fire-and-forget — wait for it to finish before continuing.
+```
+
+**辅助文件 — `datasets/extract_plantvillage.py`**：
+- 检查 ZIP 是否存在（报错退出）
+- 检查 `images/` 目录是否已提取（跳过，不重复解压）
+- 显示实时进度（每 500 文件一行）
+- 统计解压后类别数量
+
+**手动清理**：
+- 终止 3 个挂起 Python 进程（PID 55608 / 61528 / 58892）
+- 删除 C 盘 1.1GB 废弃数据（`rm -rf ~/tensorflow_datasets/`）
+- 保留 D 盘完整 ZIP：`datasets/plant_village/Plant_leaf_diseases_dataset_without_augmentation.zip`（587MB）
+
+**防止跨项目复发**：
+- STEP 0 规则普适性强（"检查再行动"是通用原则，不依赖具体框架）
+- 明确列出禁止路径模式，覆盖 Windows/Linux/Mac 的所有系统默认目录
+- STEP 2 禁止后台进程，根本上消除"不知道在跑"的问题
+
+**验证结果**：
+- `npm run build` → `313.48 KB ⚡ Build success`
+- C 盘清空确认：`ls ~/tensorflow_datasets/` → No such file
 
 ---
 
