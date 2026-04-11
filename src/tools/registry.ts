@@ -138,7 +138,7 @@ export class ToolRegistry {
   async execute(
     toolName: string,
     rawInput: unknown,
-    opts: { signal?: AbortSignal } = {}
+    opts: { signal?: AbortSignal; onProgress?: (chunk: string) => void } = {}
   ): Promise<ExecuteResult> {
     const ctx: ToolExecutionContext = {
       cwd: this.cwd,
@@ -210,7 +210,7 @@ export class ToolRegistry {
               };
             }
           } else {
-            result = await executeBash(input, ctx);
+            result = await executeBash(input, ctx, opts.onProgress);
           }
           break;
         }

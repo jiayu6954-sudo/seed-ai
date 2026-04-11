@@ -510,6 +510,17 @@ export function useAgentLoop({
             onStateChange("idle");
             break;
 
+          case "tool_progress":
+            // Append as Static (isStreaming:false) → renders once, never repainted → zero flicker
+            appendMessage({
+              id: randomUUID(),
+              role: "tool_result" as const,
+              content: [{ type: "text" as const, text: event.chunk }],
+              timestamp: new Date(),
+              isStreaming: false,
+            });
+            break;
+
           case "error":
             finalizeLastMessage();
             setMessages((prev) => [

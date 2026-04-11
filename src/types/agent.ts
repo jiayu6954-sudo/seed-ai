@@ -37,7 +37,9 @@ export type AgentEvent =
   | { type: "done"; stopReason: string }
   | { type: "error"; error: Error }
   /** I026: Human-in-the-loop checkpoint — agent paused for user review */
-  | { type: "checkpoint"; message: string };
+  | { type: "checkpoint"; message: string }
+  /** Streaming progress chunk emitted by long-running bash commands (native only) */
+  | { type: "tool_progress"; toolId: string; chunk: string };
 
 export interface AgentLoopOptions {
   model: string;          // string, not ModelId — providers accept any model string

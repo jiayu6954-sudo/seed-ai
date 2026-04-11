@@ -383,7 +383,12 @@ async function executeSingleTool(
   const toolName = toolBlock.name as ToolName;
 
   try {
-    const result = await tools.execute(toolName, toolBlock.input, { signal });
+    const result = await tools.execute(toolName, toolBlock.input, {
+      signal,
+      onProgress: (chunk: string) => {
+        onEvent({ type: "tool_progress", toolId: toolBlock.id, chunk });
+      },
+    });
     stats?.recordToolCall(toolName, result.fromCache, result.isError);
 
     onEvent({

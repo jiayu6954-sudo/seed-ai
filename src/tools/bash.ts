@@ -9,7 +9,8 @@ const MAX_TIMEOUT_MS = 300_000;
 
 export async function executeBash(
   input: BashInput,
-  ctx: ToolExecutionContext
+  ctx: ToolExecutionContext,
+  onProgress?: (chunk: string) => void
 ): Promise<ToolResult> {
   const timeoutMs = Math.min(
     input.timeout ?? DEFAULT_TIMEOUT_MS,
@@ -33,7 +34,7 @@ export async function executeBash(
         ]]
       : ["bash", ["-c", input.command]];
 
-    const result = await execa(shell, shellArgs, {
+    const subprocess = execa(shell, shellArgs, {
       cwd: ctx.cwd,
       timeout: timeoutMs,
       reject: false,           // Don't throw on non-zero exit
@@ -42,6 +43,33 @@ export async function executeBash(
       cleanup: true,           // Kill child on parent exit
       cancelSignal: ctx.signal as AbortSignal | undefined,
     });
+
+    // Stream progress to caller: flush every 2s or when buffer hits 2 KB.
+    // Only active for native bash (not Docker sandbox).
+    if (onProgress && subprocess.all) {
+      const FLUSH_INTERVAL_MS = 2_000;
+      const FLUSH_BYTES = 2_048;
+      let buf = "";
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const flush = (): void => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (buf.length > 0) { onProgress(buf); buf = ""; }
+      };
+
+      subprocess.all.on("data", (chunk: Buffer | string) => {
+        buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (buf.length >= FLUSH_BYTES) {
+          flush();
+        } else if (!timer) {
+          timer = setTimeout(flush, FLUSH_INTERVAL_MS);
+        }
+      });
+
+      subprocess.all.once("end", flush);
+    }
+
+    const result = await subprocess;
 
     const rawOutput = result.all ?? result.stdout + result.stderr;
     const truncated = rawOutput.length > MAX_OUTPUT_CHARS;
