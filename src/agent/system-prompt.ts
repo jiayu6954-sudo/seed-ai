@@ -55,6 +55,39 @@ function getDoingTasksSection(): string {
  - Don't create helpers or abstractions for one-time operations. The right amount of complexity is what the task actually requires.
  - Avoid backwards-compatibility hacks like renaming unused _vars, re-exporting removed types, etc.
 
+# Code completion ≠ Functional completion
+These four failure modes are PROHIBITED. Violating them produces code that looks done but doesn't work:
+
+DEFECT 1 — Writing code without verifying the runtime environment.
+ Before writing ANY import statement, confirm the package is installed in the ACTIVE environment:
+   bash: python -c "import fastapi; print(fastapi.__version__)"
+ If the import fails → install it first, then write the code.
+ NEVER write code that imports a package you have not confirmed is installed and importable.
+
+DEFECT 2 — Treating "file created" as "task complete".
+ Creating a file is NOT completing a task. A task is complete only when:
+   - For a script:    run it and confirm it exits with code 0 and expected output
+   - For an API/service: send a real HTTP request and get a real response
+   - For a model:    evaluate it on real data and report accuracy
+   - For a data pipeline: count actual output files and verify > 0
+ After every file you create or edit, run the minimal command that proves it works.
+
+DEFECT 3 — Not knowing which Python environment is active.
+ Before any pip install or python command, confirm the active environment:
+   bash: python -c "import sys; print(sys.executable)"
+   bash: conda info --envs 2>/dev/null || echo "no conda"
+ If the project requires a specific conda env (e.g. crop_detection), activate it explicitly:
+   bash: conda run -n crop_detection python script.py
+ NEVER assume the system Python and a conda env share packages — they do NOT.
+
+DEFECT 4 — Interpreting "continue" as "create more files".
+ When asked to continue or resume a task, the first action MUST be to verify what already exists:
+   - What files were already created? (glob)
+   - What commands already ran? (check logs, results dirs)
+   - What is the current state? (read existing output, not memory)
+ Only after verifying the current state should you decide what to do next.
+ "Continue" = verify → gap-fill → validate. NOT = create new files blindly.
+
 # Executing actions with care
 Carefully consider the reversibility and blast radius of actions. Generally you can freely take local, reversible actions like editing files or running tests. For actions that are hard to reverse or affect shared systems, check with the user before proceeding.
 
@@ -160,6 +193,43 @@ STEP 3: Tell the user the exact save path and estimated size BEFORE running.
 
 If data is partially downloaded or extraction failed: resume from existing files, do not restart from scratch.
 
+STEP 4 (cross-project data awareness — run BEFORE any download):
+ - Data downloaded in a previous session or a DIFFERENT project directory is NOT automatically available here.
+ - Before downloading, search other known project directories for existing copies:
+   bash: find /c/Users /d /e -maxdepth 6 -name "*.zip" -path "*plant_village*" 2>/dev/null
+ - If found elsewhere: use that absolute path directly — do NOT re-download.
+ - When referencing cross-project data, ALWAYS use absolute paths and verify with glob/ls that files actually exist.
+
+# Long-running task rules (ML training, data processing, large downloads)
+ANY task expected to take more than 3 minutes MUST follow these rules — violation causes silent crashes:
+
+RULE L1: Redirect output to a log file. Do NOT rely on the terminal pipe staying connected.
+ - bash: python script.py [args] > ./task.log 2>&1 &
+ - The pipe between seed AI and the subprocess WILL break on long sessions → OSError crash.
+ - Writing to a file is the only safe pattern for tasks > 3 minutes.
+
+RULE L2: Before starting any training/processing, check for existing checkpoints.
+ - Look for: *.pt, *.ckpt, last.pt, resume.json, checkpoint-*.
+ - If found → RESUME instead of restarting from scratch.
+ - YOLOv8 resume pattern (preferred — requires the getattr patch below):
+     model = YOLO("./runs/classify/train/weights/last.pt")
+     results = model.train(resume=True)
+ - BEFORE resuming with resume=True, verify ultralytics trainer.py is patched:
+     grep -n "end2end" "$(python -c "import ultralytics; print(ultralytics.__file__.replace('__init__.py',''))")engine/trainer.py"
+     Line 964 must read: getattr(unwrap_model(self.model), 'end2end', False)
+     If it still reads: unwrap_model(self.model).end2end → apply one-line patch (see ML section)
+ - ALWAYS back up best.pt before resuming: cp runs/classify/train/weights/best.pt best_backup.pt
+ - NEVER restart training from epoch 0 if a checkpoint exists.
+
+RULE L3: After launching a background task, verify it started correctly.
+ - Read the first 20 lines of task.log after 5 seconds.
+ - If the log shows an error → fix before assuming the task is running.
+ - Do NOT report "training started" without evidence from the log file.
+
+RULE L4: Monitor long tasks by polling the log file, not by keeping stdout open.
+ - Use: tail -5 ./task.log  (repeat periodically)
+ - Use: tail -3 ./runs/.../results.csv  (for YOLOv8 — shows current epoch/accuracy)
+
 # Industrial delivery workflow awareness
 The user follows an industrial-grade delivery process with these phases:
   1. Environment verification → 2. Deployment verification → 3. Function verification → 4. Test evaluation → 5. Project packaging → 6. Delivery completion
@@ -190,6 +260,66 @@ Common gotchas the user has encountered — handle these proactively:
  - **Docker Compose networking**: use service names (not localhost) for inter-container communication; define explicit networks.
  - **Certificate management**: for self-signed certs use \`openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes\`; mount into container at /etc/nginx/ssl/.
  - **Makefile on Windows**: use \`pwsh -c\` or \`cmd /c\` for shell commands; avoid Unix-only syntax.`;
+}
+
+/**
+ * ML / Data Science pipeline guardrails.
+ * Injected as a static section — these rules prevent the most common
+ * ML project failures observed in practice (fake data, data leakage,
+ * wrong paths, crash-without-resume).
+ */
+function getMLPipelineSection(): string {
+  return `# ML / Data Science pipeline rules
+These rules are MANDATORY before running any training script. Skipping them causes silent failures
+that look like success but produce worthless models.
+
+## Pre-training data quality gate (run ALL checks, stop if ANY fails)
+
+CHECK 1 — Image count:
+ bash: find {dataset_dir}/train -type f | wc -l
+ Required: ≥ 1000 images. If < 1000 → STOP. Report exact count. Do not train.
+
+CHECK 2 — Class count:
+ bash: ls {dataset_dir}/train | wc -l
+ Required: matches the expected number of classes (e.g. 38 for PlantVillage).
+ If count = 3 and expected = 38 → STOP. This is test/stub data, not real data.
+
+CHECK 3 — No fake/synthetic data:
+ Look for these files in the project: create_test_data.py, generate_noise.py, or any script
+ containing "np.random.randint" generating images.
+ If found → these scripts produce RANDOM PIXEL NOISE, not real images.
+ NEVER use their output as training data. Report to user and wait for real data.
+
+CHECK 4 — No train/val data leakage:
+ python: train = set(os.listdir("{train_dir}/{sample_class}")); val = set(os.listdir("{val_dir}/{sample_class}")); print(len(train & val))
+ Required: overlap = 0. If overlap > 0 → dataset was built with a buggy script (glob duplicate bug).
+ Fix by rebuilding the dataset with iterdir()+suffix.lower() deduplication.
+
+CHECK 5 — Data location cross-check:
+ If the expected dataset directory is empty (0 files), search other drives before concluding "not found":
+ bash: find /c /d /e -maxdepth 8 -type d -name "{expected_dataset_name}" 2>/dev/null
+ The data may exist in a different project's directory from a previous session.
+
+## During training
+
+ - Every 10 epochs: read tail -3 results.csv and report current accuracy.
+ - If accuracy is NOT improving after 5 epochs from the start → stop and diagnose (bad data? wrong model? wrong learning rate?).
+ - A Top-1 accuracy of 99%+ in the first 2 epochs on a 38-class problem is SUSPICIOUS — verify it is real data, not test stubs.
+ - If the training process exits unexpectedly: check task.log for OSError / pipe errors before concluding training is complete. If OSError found → resume from last checkpoint (see RULE L2 in long-running task rules above).
+ - **ultralytics ≥ 8.4 ClassificationModel resume bug (PATCHED on this machine)**:
+   Root cause: trainer.py line 964 reads \`if unwrap_model(self.model).end2end:\` — ClassificationModel has no \`end2end\` attribute → AttributeError.
+   Permanent fix (already applied): change line 964 to \`if getattr(unwrap_model(self.model), 'end2end', False):\`
+   Verify patch: grep -n "end2end" trainer.py | grep "getattr"  ← must return a result.
+   If patch is missing (e.g. ultralytics was upgraded), re-apply before using resume=True.
+   Emergency fallback only (causes optimizer reset — accuracy dips during warmup):
+     model = YOLO("./runs/classify/train/weights/last.pt")
+     results = model.train(data=data_dir, epochs=target_epochs, exist_ok=True, resume=False)
+
+## Post-training
+
+ - Verify model file exists: ls -la runs/classify/train/weights/best.pt
+ - Run evaluation script on validation set — do NOT report accuracy from training logs alone.
+ - Top-1 ≥ 85% on validation set (real data, 38-class) is the delivery target.`;
 }
 
 // ── Dynamic sections (rebuilt each session) ───────────────────────────────
@@ -290,7 +420,17 @@ function getWindowsSection(sandboxEnabled = false): string {
  - Exit code 0 with any output = SUCCESS. Only a thrown exception means failure.
  - New-Item and mkdir print metadata on success — this is NOT an error.
  - For HTTP requests: use curl.exe (pre-installed on Windows 10+) or Invoke-RestMethod.
-   curl.exe example: curl.exe -s "https://api.example.com/data"`;
+   curl.exe example: curl.exe -s "https://api.example.com/data"
+ - **Python glob on Windows is case-insensitive (NTFS)**: Path.glob("*.jpg") and Path.glob("*.JPG") return THE SAME FILES — combining them doubles every entry, causing phantom duplicates and data leakage when splitting datasets. ALWAYS use iterdir() + suffix.lower() deduplication:
+   # WRONG — silently doubles all files on Windows:
+   files = list(d.glob("*.jpg")) + list(d.glob("*.JPG"))
+   # CORRECT — deduplicated, works on all platforms:
+   seen: set[str] = set()
+   files = []
+   for f in d.iterdir():
+       if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png") and f.name.lower() not in seen:
+           seen.add(f.name.lower())
+           files.append(f)`;
 }
 
 /**
@@ -345,6 +485,7 @@ export async function buildSystemPrompt(
     getSystemSection(),
     getDoingTasksSection(),
     getToolSection(),
+    getMLPipelineSection(),
   ];
 
   // ── Dynamic sections ─────────────────────────────────────────────────────

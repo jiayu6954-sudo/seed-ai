@@ -2,12 +2,13 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-12 · v0.9.2-alpha.27 (r55) · 下次更新节点：YOLOv8 第二轮训练验证（目标 Top-1 ≥ 85%，真实数据）**
+**最后更新：2026-04-12 · v0.9.2-alpha.27 (r56) · 下次更新节点：YOLOv8 第二轮训练验证（目标 Top-1 ≥ 85%，真实数据）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.27 r56  | 2026-04-12 | FIX: 4大能力缺陷 — 不验证环境/完成混淆/环境交叉/继续=创建文件 |
 | alpha.27 r55  | 2026-04-12 | FEAT: ML 质量门控 + ultralytics resume bug 文档化（getMLPipelineSection）|
 | alpha.27 r54  | 2026-04-12 | FIX: 长任务 pipe 断开 → OSError 崩溃（L1-L4 规则 + 跨项目数据感知）|
 | alpha.27 r53  | 2026-04-12 | FIX: stream TTFT/chunk 超时（3min/2min）— 防止 DeepSeek 静默挂起 11h+）|
@@ -145,6 +146,52 @@ Workflow: metadata → git tree → key files → synthesise
 - 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
 - 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
 - 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r56 (4大能力缺陷修复)
+
+### [FIX] Code completion ≠ Functional completion — 四条强制规则
+
+**触发背景**：用户总结 seed AI 在实际 ML 项目执行中暴露的四个系统性行为缺陷，要求固化为不可绕过的行为规则。
+
+**缺陷一览**：
+
+| 缺陷 | 具体表现 | 后果 |
+|------|---------|------|
+| 不验证依赖环境 | 写 `import fastapi` 但从未运行测试 | 代码保存后立即 ImportError |
+| 不区分"完成代码"与"完成功能" | 文件创建完 = 任务完成，无执行验证 | 脚本从未实际运行过 |
+| 不知道工作在哪个 Python 环境 | 两个环境交叉，包无法互相访问 | pip install 到错误环境 |
+| "继续执行"理解为"继续创建文件" | 应先验证已有系统，再扩展 | 重复创建已有文件，忽略真实状态 |
+
+**注入 `src/agent/system-prompt.ts` — `getDoingTasksSection()` 末尾**：
+
+```
+# Code completion ≠ Functional completion
+
+DEFECT 1 — 写代码前必须验证包已安装：
+  python -c "import fastapi; print(fastapi.__version__)"
+  失败 → 先 pip install，再写代码
+
+DEFECT 2 — 文件创建后必须运行验证：
+  脚本 → 运行并确认 exit code 0 + 期望输出
+  API/服务 → 发送真实 HTTP 请求
+  模型 → 在真实数据上评估并报告准确率
+  数据管道 → 统计实际输出文件数 > 0
+
+DEFECT 3 — 任何 pip/python 命令前先确认活跃环境：
+  python -c "import sys; print(sys.executable)"
+  项目需要 conda env → conda run -n crop_detection python script.py
+  系统 Python 和 conda env 的包不共享
+
+DEFECT 4 — "继续"的第一步是验证现状：
+  已创建了哪些文件？(glob)
+  已运行了哪些命令？(检查日志/结果目录)
+  当前状态是什么？(读实际输出，不靠记忆)
+  "继续" = 验证 → 补缺口 → 确认。不是 = 盲目创建新文件
+```
+
+**验证**：`npm run build` → 323.67 KB ✓ · `npx vitest run` → 18/18 ✓
 
 ---
 
