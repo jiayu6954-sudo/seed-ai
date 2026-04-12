@@ -11,27 +11,28 @@
 ### PlantVillage 数据集
 | 项目 | 状态 |
 |------|------|
-| ZIP 文件 | **不存在 / 已删除（损坏）** |
-| 解压图片 | **不存在** |
-| 需要操作 | 重新下载 → 验证 → 解压 |
+| 原始 ZIP | `./datasets/plant_village/archive.zip`（2.1GB，完整）|
+| **解压图片** | ✅ **已就绪** |
+| 图片路径 | `./datasets/plant_village/images/plantvillage dataset/color/` |
+| 类别数 | **38 类** |
+| 总图片数 | **54,305 张** |
 
-**下载方式（按优先级）**：
-
-1. **Kaggle CLI**（需要 `~/.kaggle/kaggle.json`）：
-   ```bash
-   kaggle datasets download -d abdallahalidev/plantvillage-dataset \
-     -p ./datasets/plant_village/ --unzip
-   ```
-
-2. **手动下载**：
-   - 浏览器打开：https://www.kaggle.com/datasets/abdallahalidev/plantvillage-dataset
-   - 下载后放到：`./datasets/plant_village/`
+**图片路径结构**：
+```
+datasets/plant_village/images/plantvillage dataset/color/
+├── Apple___Apple_scab/       (630张)
+├── Apple___Black_rot/
+├── Apple___Cedar_apple_rust/
+├── Apple___healthy/
+├── ...                       (共38个类别)
+└── Tomato___Yellow_Leaf_Curl_Virus/
+```
 
 **严禁行为**：
 - ❌ 禁止使用 `tfds.load()` — 默认保存到 `C:\Users\...`，不可用
-- ❌ 禁止创建新的 `download_plantvillage.py` — 已知会无限重下载
-- ❌ 禁止后台进程下载（`subprocess.Popen`、`&`）
-- ✅ 下载前先检查 `./datasets/plant_village/` 是否已有文件
+- ❌ 禁止创建新的 `download_plantvillage.py` — 已有数据，无需下载
+- ❌ 禁止任何形式的重新下载（数据已完整）
+- ✅ 直接使用 `./datasets/plant_village/images/plantvillage dataset/color/` 作为数据源
 
 ---
 
