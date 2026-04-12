@@ -216,18 +216,53 @@ function toOAIMessages(
 
 // ── SSE parser ────────────────────────────────────────────────────────────────
 
+// Timeout constants for stream health checks
+const TTFT_TIMEOUT_MS   = 3 * 60 * 1_000;  // 3 min — time to first token
+const CHUNK_TIMEOUT_MS  = 2 * 60 * 1_000;  // 2 min — max silence between chunks
+
+/**
+ * Wrap a reader.read() call with a hard deadline.
+ * Rejects with a TimeoutError if no chunk arrives within `ms` milliseconds.
+ */
+function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  ms: number,
+  label: string
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(
+        `Stream ${label} timeout after ${ms / 1000}s — ` +
+        `provider sent no data. Try again or switch provider.`
+      ));
+    }, ms);
+    reader.read().then(
+      (result) => { clearTimeout(timer); resolve(result); },
+      (err)    => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
 async function* parseSSE(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal?: AbortSignal
 ): AsyncGenerator<OAIChunk> {
   const decoder = new TextDecoder();
   let buffer = "";
+  let firstChunk = true;
 
   try {
     while (true) {
       if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+
+      // Use a longer timeout for the very first chunk (TTFT can be high for
+      // large contexts), shorter for subsequent chunks (inter-chunk silence).
+      const timeoutMs = firstChunk ? TTFT_TIMEOUT_MS : CHUNK_TIMEOUT_MS;
+      const label     = firstChunk ? "TTFT" : "inter-chunk";
+
+      const { done, value } = await readWithTimeout(reader, timeoutMs, label);
       if (done) break;
+      firstChunk = false;
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
