@@ -2,12 +2,16 @@
 > 按时间顺序记录每次创新实现、Bug 修复的具体操作步骤、修改文件和验证结果。  
 > 用于快速回溯"当时做了什么"以及"为什么这样做"。
 
-**最后更新：2026-04-12 · v0.9.2-alpha.27 (r51) · 下次更新节点：ML方案完整执行验证（YOLOv8 PlantVillage）**
+**最后更新：2026-04-12 · v0.9.2-alpha.27 (r55) · 下次更新节点：YOLOv8 第二轮训练验证（目标 Top-1 ≥ 85%，真实数据）**
 
 ## 版本快速索引
 
 | 版本节点 | 日期 | 内容 |
 |---------|------|------|
+| alpha.27 r55  | 2026-04-12 | FEAT: ML 质量门控 + ultralytics resume bug 文档化（getMLPipelineSection）|
+| alpha.27 r54  | 2026-04-12 | FIX: 长任务 pipe 断开 → OSError 崩溃（L1-L4 规则 + 跨项目数据感知）|
+| alpha.27 r53  | 2026-04-12 | FIX: stream TTFT/chunk 超时（3min/2min）— 防止 DeepSeek 静默挂起 11h+）|
+| alpha.27 r52  | 2026-04-12 | FIX: AI 幻觉防护 — glob 空结果显示实际搜索路径 + "未找到≠不存在"规则 |
 | alpha.27 r51  | 2026-04-12 | FIX: 测试隔离 — hasLongTermMemory/clearProjectMemory 受真实 user.md 污染 |
 | alpha.27 r50  | 2026-04-12 | FIX: Token 预算解析器误读 GPU 型号 (RTX 4070 → 4,070 token 上限) |
 | alpha.27 r49  | 2026-04-11 | FIX: 数据下载三重保障 — 强制前置检查/禁止重复下载/禁止后台进程 |
@@ -141,6 +145,147 @@ Workflow: metadata → git tree → key files → synthesise
 - 直接给 AI 一个 GitHub 仓库 URL → AI 自动提取仓库结构、核心文件、实现模式
 - 将学到的开源知识应用到当前项目（如集成最佳实践、借鉴架构设计）
 - 配置 `github.token` 后：60 req/hr → 5000 req/hr（无限制学习大型仓库）
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r55 (ML 质量门控 + ultralytics resume bug)
+
+### [FEAT] getMLPipelineSection — ML 训练全链路防失败规则
+
+**触发背景**：seed AI 在 e:/nzw 项目执行 YOLOv8 PlantVillage 训练时出现多个系统性失败，经四轮审查整理为 BUG-001 到 BUG-012。优化师（用户）记录在 `SEED_AI_MONITOR.md`，要求全部归入系统记忆。
+
+**实际训练结果（验证）**：
+- 数据：38类 / 54,305张（真实 PlantVillage，无泄漏）
+- 训练集：43,428张 / 验证集：10,876张
+- 训练结果：**Top-1 = 99.798%，Top-5 = 100%**（epoch 47/50，early stop）
+- 模型：`e:/nzw/crop_project/runs/classify/train/weights/best.pt`
+
+**已发现并修复的 BUG 清单**：
+
+| BUG | 严重性 | 问题 | 状态 |
+|-----|--------|------|------|
+| BUG-001 | HIGH | 数据在 devai 项目目录，crop 项目未对接 | ✅ 修复 |
+| BUG-002 | CRITICAL | 在随机噪声图像（create_test_data.py）上训练 | ✅ 修复 |
+| BUG-003 | CRITICAL | 只有 3 类而非 38 类 | ✅ 修复 |
+| BUG-004 | HIGH | 两条并行冲突的数据流水线（根目录/crop_project）| ✅ 修复 |
+| BUG-005 | HIGH | train_crop.py 模型路径错误（`./train/...` 应为 `./runs/classify/train/...`）| ✅ 修复 |
+| BUG-006 | MEDIUM | evaluate_crop.py 只搜索 `.jpg`，漏掉 `.JPG` / `.png` | ✅ 修复 |
+| BUG-007 | MEDIUM | 嵌套目录 `crop_project/crop_project/` 污染 | ✅ 清理 |
+| BUG-008 | LOW | download_plantvillage.py 路径错误 + 未覆盖 data_dir | ✅ 已知问题（不再使用）|
+| BUG-009 | INFO | yolo26n.pt 来源不明（不是任何已知 YOLO 版本）| ℹ️ 保留观察 |
+| BUG-010 | HIGH | Windows glob 大小写重复计数 → 数据泄漏 32% | ✅ 修复（iterdir+suffix.lower 去重）|
+| BUG-011 | CRITICAL | pipe 断开 → ultralytics OSError 崩溃（第 22 轮）| ✅ 修复（见 r54）|
+| BUG-012 | MEDIUM | ultralytics ≥8.4 ClassificationModel.end2end AttributeError | ✅ 文档化（workaround）|
+
+**注入 `src/agent/system-prompt.ts` 的新函数 `getMLPipelineSection()`**：
+
+```
+## Pre-training data quality gate (run ALL checks)
+CHECK 1 — Image count ≥ 1000
+CHECK 2 — Class count matches expected (e.g. 38)
+CHECK 3 — No fake/synthetic data (np.random.randint → 随机噪声，禁止使用)
+CHECK 4 — No train/val data leakage (overlap must = 0)
+CHECK 5 — Data location cross-check (search /c /d /e if empty)
+
+## During training
+- Every 10 epochs: read results.csv and report accuracy
+- 99%+ in first 2 epochs on 38-class → SUSPICIOUS, verify not test stubs
+- If OSError in log → resume from last.pt, NOT restart
+
+## ultralytics ≥8.4 ClassificationModel resume workaround
+- model.train(resume=True) raises AttributeError: 'ClassificationModel' has no 'end2end'
+- Workaround: load last.pt directly + exist_ok=True (do NOT pass resume=True)
+```
+
+**验证**：`npm run build` → 320.96 KB ✓ · `npx vitest run` → 18/18 ✓
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r54 (长任务 pipe 断开修复 + 跨项目数据感知)
+
+### [FIX] 长时间训练进程因 seed AI pipe 断开崩溃
+
+**触发背景**：YOLOv8 训练运行约 22 分钟后，seed AI 的 agent loop 超时/断开，pipe 读端关闭，Python 子进程 `LOGGER.info()` 写入已关闭的 stdout pipe 端 → `OSError: [Errno 22] Invalid argument` → 整个训练进程终止。
+
+**根因**：
+- seed AI r46 bash 流式输出通过 pipe 连接子进程 stdout
+- 子进程长期运行时，seed AI 侧的 pipe 读端会因 agent loop 结束而关闭
+- ultralytics LOGGER 不捕获 OSError，一次 print 失败就终止整个进程
+
+**注入 `src/agent/system-prompt.ts`（Data download 规则扩展 + 新增 Long-running task rules）**：
+
+```
+RULE L1: Redirect output to log file — NEVER rely on terminal pipe
+  bash: python script.py > ./task.log 2>&1 &
+  The pipe WILL break on long sessions → OSError crash
+
+RULE L2: Before starting, check for existing checkpoints (*.pt, last.pt)
+  If found → RESUME (YOLOv8: model = YOLO("last.pt"); model.train(exist_ok=True))
+  NEVER restart from epoch 0 if checkpoint exists
+
+RULE L3: After launching, verify start (read first 20 lines of task.log after 5s)
+  Do NOT report "training started" without log evidence
+
+RULE L4: Monitor by polling log file, not keeping stdout open
+  tail -5 ./task.log
+  tail -3 ./runs/.../results.csv
+```
+
+**同时注入 STEP 4（跨项目数据感知）**：
+```
+STEP 4: Before downloading, search other drives for existing copies:
+  find /c/Users /d /e -maxdepth 6 -name "*.zip" -path "*plant_village*"
+Data downloaded in a different project is NOT automatically available here.
+```
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r53 (stream 超时防止 DeepSeek 静默挂起)
+
+### [FIX] parseSSE reader.read() 无超时 — 进程挂起 11 小时
+
+**触发背景**：seed 进程在 `streaming` 状态下静默挂起超过 11 小时（00:41→12:24），DeepSeek 服务端断开连接但未发送 `[DONE]`，`reader.read()` 永远阻塞。
+
+**修复 — `src/providers/openai-compatible.ts`**：
+
+```typescript
+const TTFT_TIMEOUT_MS  = 3 * 60 * 1_000;  // 3分钟 — 首 token 延迟上限
+const CHUNK_TIMEOUT_MS = 2 * 60 * 1_000;  // 2分钟 — 块间静默上限
+
+function readWithTimeout(reader, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(
+      `Stream ${label} timeout after ${ms/1000}s — provider sent no data.`
+    )), ms);
+    reader.read().then(r => { clearTimeout(timer); resolve(r); }, ...);
+  });
+}
+```
+
+超时后显示：`Stream TTFT timeout after 180s — try again or switch provider.`
+
+---
+
+## 2026-04-12 · v0.9.2-alpha.27-r52 (AI 幻觉防护)
+
+### [FIX] glob 空结果 → AI 伪造"已完成"结论
+
+**触发背景**：用户要求解压 ZIP，AI 用 glob 搜索 `*.zip`，结果为空（路径偏移），AI 报告"没有需要解压的 ZIP 文件，数据已经以解压形式存在" — 实际上 587MB ZIP 完好存在。
+
+**两处修复**：
+
+1. **`src/tools/glob.ts`**：空结果消息包含实际搜索路径：
+   ```typescript
+   // 修复前：No files matched pattern: *.zip
+   // 修复后：No files matched "*.zip" in: D:\claude\devai
+   ```
+
+2. **`src/agent/system-prompt.ts`**：新增两条防幻觉规则：
+   ```
+   "Not found" means search failed, NOT that the resource doesn't exist.
+   Verify before concluding — need explicit tool evidence (file listing/content/output)
+   before saying "X is already done" or "X does not exist".
+   ```
 
 ---
 
